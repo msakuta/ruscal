@@ -8,8 +8,7 @@ use nom::{
     multi::{fold_many0, many0, separated_list0},
     number::complete::recognize_float,
     sequence::{delimited, pair},
-    IResult,
-    Finish,
+    Finish, IResult,
 };
 
 fn main() {
@@ -178,7 +177,7 @@ fn expr(i: &str) -> IResult<&str, Expression> {
     )(i)
 }
 
-fn statements(i: &str) -> Result<Statements,  nom::error::Error<&str>> {
+fn statements(i: &str) -> Result<Statements, nom::error::Error<&str>> {
     let (_, res) = separated_list0(tag(";"), expr)(i).finish()?;
     Ok(res)
 }

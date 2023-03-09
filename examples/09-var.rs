@@ -3,7 +3,9 @@ use std::{collections::HashMap, io::Read};
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{alpha1, alphanumeric1, char, multispace0, multispace1},
+    character::complete::{
+        alpha1, alphanumeric1, char, multispace0, multispace1,
+    },
     combinator::{opt, recognize},
     multi::{fold_many0, many0, separated_list0},
     number::complete::recognize_float,
@@ -28,7 +30,9 @@ fn main() {
 
     for statement in parsed_statements {
         match statement {
-            Statement::Expression(expr) => println!("eval: {:?}", eval(expr, &variables)),
+            Statement::Expression(expr) => {
+                println!("eval: {:?}", eval(expr, &variables))
+            }
             Statement::VarDef(name, expr) => {
                 let value = eval(expr, &variables);
                 variables.insert(name, value);
@@ -56,7 +60,9 @@ enum Statement<'src> {
 
 type Statements<'a> = Vec<Statement<'a>>;
 
-fn unary_fn(f: fn(f64) -> f64) -> impl Fn(Vec<Expression>, &HashMap<&str, f64>) -> f64 {
+fn unary_fn(
+    f: fn(f64) -> f64,
+) -> impl Fn(Vec<Expression>, &HashMap<&str, f64>) -> f64 {
     move |args, variables| {
         f(eval(
             args.into_iter().next().expect("function missing argument"),
@@ -65,7 +71,9 @@ fn unary_fn(f: fn(f64) -> f64) -> impl Fn(Vec<Expression>, &HashMap<&str, f64>) 
     }
 }
 
-fn binary_fn(f: fn(f64, f64) -> f64) -> impl Fn(Vec<Expression>, &HashMap<&str, f64>) -> f64 {
+fn binary_fn(
+    f: fn(f64, f64) -> f64,
+) -> impl Fn(Vec<Expression>, &HashMap<&str, f64>) -> f64 {
     move |args, variables| {
         let mut args = args.into_iter();
         let lhs = eval(
@@ -80,28 +88,30 @@ fn binary_fn(f: fn(f64, f64) -> f64) -> impl Fn(Vec<Expression>, &HashMap<&str, 
     }
 }
 
-fn eval(expr: Expression, variables: &HashMap<&str, f64>) -> f64 {
+fn eval(expr: Expression, vars: &HashMap<&str, f64>) -> f64 {
     match expr {
         Expression::Ident("pi") => std::f64::consts::PI,
-        Expression::Ident(id) => *variables.get(id).expect("Variable not found"),
+        Expression::Ident(id) => *vars.get(id).expect("Variable not found"),
         Expression::NumLiteral(n) => n,
-        Expression::FnInvoke("sqrt", args) => unary_fn(f64::sqrt)(args, variables),
-        Expression::FnInvoke("sin", args) => unary_fn(f64::sin)(args, variables),
-        Expression::FnInvoke("cos", args) => unary_fn(f64::cos)(args, variables),
-        Expression::FnInvoke("tan", args) => unary_fn(f64::tan)(args, variables),
-        Expression::FnInvoke("asin", args) => unary_fn(f64::asin)(args, variables),
-        Expression::FnInvoke("acos", args) => unary_fn(f64::acos)(args, variables),
-        Expression::FnInvoke("atan", args) => unary_fn(f64::atan)(args, variables),
-        Expression::FnInvoke("atan2", args) => binary_fn(f64::atan2)(args, variables),
-        Expression::FnInvoke("pow", args) => binary_fn(f64::powf)(args, variables),
-        Expression::FnInvoke("exp", args) => unary_fn(f64::exp)(args, variables),
-        Expression::FnInvoke("log", args) => binary_fn(f64::log)(args, variables),
-        Expression::FnInvoke("log10", args) => unary_fn(f64::log10)(args, variables),
+        Expression::FnInvoke("sqrt", args) => unary_fn(f64::sqrt)(args, vars),
+        Expression::FnInvoke("sin", args) => unary_fn(f64::sin)(args, vars),
+        Expression::FnInvoke("cos", args) => unary_fn(f64::cos)(args, vars),
+        Expression::FnInvoke("tan", args) => unary_fn(f64::tan)(args, vars),
+        Expression::FnInvoke("asin", args) => unary_fn(f64::asin)(args, vars),
+        Expression::FnInvoke("acos", args) => unary_fn(f64::acos)(args, vars),
+        Expression::FnInvoke("atan", args) => unary_fn(f64::atan)(args, vars),
+        Expression::FnInvoke("atan2", args) => {
+            binary_fn(f64::atan2)(args, vars)
+        }
+        Expression::FnInvoke("pow", args) => binary_fn(f64::powf)(args, vars),
+        Expression::FnInvoke("exp", args) => unary_fn(f64::exp)(args, vars),
+        Expression::FnInvoke("log", args) => binary_fn(f64::log)(args, vars),
+        Expression::FnInvoke("log10", args) => unary_fn(f64::log10)(args, vars),
         Expression::FnInvoke(name, _) => panic!("Unknown function {name:?}"),
-        Expression::Add(lhs, rhs) => eval(*lhs, variables) + eval(*rhs, variables),
-        Expression::Sub(lhs, rhs) => eval(*lhs, variables) - eval(*rhs, variables),
-        Expression::Mul(lhs, rhs) => eval(*lhs, variables) * eval(*rhs, variables),
-        Expression::Div(lhs, rhs) => eval(*lhs, variables) / eval(*rhs, variables),
+        Expression::Add(lhs, rhs) => eval(*lhs, vars) + eval(*rhs, vars),
+        Expression::Sub(lhs, rhs) => eval(*lhs, vars) - eval(*rhs, vars),
+        Expression::Mul(lhs, rhs) => eval(*lhs, vars) * eval(*rhs, vars),
+        Expression::Div(lhs, rhs) => eval(*lhs, vars) / eval(*rhs, vars),
     }
 }
 
@@ -173,7 +183,9 @@ fn term(i: &str) -> IResult<&str, Expression> {
         |acc, (op, val): (char, Expression)| match op {
             '*' => Expression::Mul(Box::new(acc), Box::new(val)),
             '/' => Expression::Div(Box::new(acc), Box::new(val)),
-            _ => panic!("Multiplicative expression should have '*' or '/' operator"),
+            _ => panic!(
+                "Multiplicative expression should have '*' or '/' operator"
+            ),
         },
     )(i)
 }
