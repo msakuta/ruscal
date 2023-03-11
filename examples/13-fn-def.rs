@@ -26,9 +26,9 @@ fn main() {
         }
     };
 
-    let mut runtime = Runtime::new();
+    let mut frame = StackFrame::new();
 
-    eval_stmts(&parsed_statements, &mut runtime);
+    eval_stmts(&parsed_statements, &mut frame);
 }
 
 enum FnDef<'src> {
@@ -37,16 +37,16 @@ enum FnDef<'src> {
 }
 
 impl<'src> FnDef<'src> {
-    fn call(&self, args: &[f64], runtime: &Runtime) -> f64 {
+    fn call(&self, args: &[f64], frame: &StackFrame) -> f64 {
         match self {
             Self::User(code) => {
-                let mut new_runtime = Runtime::push_stack(runtime);
-                new_runtime.vars = args
+                let mut new_frame = StackFrame::push_stack(frame);
+                new_frame.vars = args
                     .iter()
                     .zip(code.args.iter())
                     .map(|(arg, name)| (name.to_string(), *arg))
                     .collect();
-                eval_stmts(&code.stmts, &mut new_runtime)
+                eval_stmts(&code.stmts, &mut new_frame)
             }
             Self::Native(code) => (code.code)(args),
         }
@@ -65,13 +65,13 @@ struct NativeFn {
 type Variables = HashMap<String, f64>;
 type Functions<'src> = HashMap<String, FnDef<'src>>;
 
-struct Runtime<'src> {
+struct StackFrame<'src> {
     vars: Variables,
     funcs: Functions<'src>,
-    uplevel: Option<&'src Runtime<'src>>,
+    uplevel: Option<&'src StackFrame<'src>>,
 }
 
-impl<'src> Runtime<'src> {
+impl<'src> StackFrame<'src> {
     fn new() -> Self {
         let mut funcs = Functions::new();
         funcs.insert("sqrt".to_string(), unary_fn(f64::sqrt));
@@ -122,24 +122,24 @@ impl<'src> Runtime<'src> {
 
 fn eval_stmts<'src>(
     stmts: &[Statement<'src>],
-    runtime: &mut Runtime<'src>,
+    frame: &mut StackFrame<'src>,
 ) -> f64 {
     let mut last_result = 0.;
     for statement in stmts {
         match statement {
             Statement::Expression(expr) => {
-                last_result = eval(expr, runtime);
+                last_result = eval(expr, frame);
             }
             Statement::VarDef(name, expr) => {
-                let value = eval(expr, runtime);
-                runtime.vars.insert(name.to_string(), value);
+                let value = eval(expr, frame);
+                frame.vars.insert(name.to_string(), value);
             }
             Statement::VarAssign(name, expr) => {
-                if !runtime.vars.contains_key(*name) {
+                if !frame.vars.contains_key(*name) {
                     panic!("Variable is not defined");
                 }
-                let value = eval(expr, runtime);
-                runtime.vars.insert(name.to_string(), value);
+                let value = eval(expr, frame);
+                frame.vars.insert(name.to_string(), value);
             }
             Statement::For {
                 loop_var,
@@ -147,15 +147,15 @@ fn eval_stmts<'src>(
                 end,
                 stmts,
             } => {
-                let start = eval(start, runtime) as isize;
-                let end = eval(end, runtime) as isize;
+                let start = eval(start, frame) as isize;
+                let end = eval(end, frame) as isize;
                 for i in start..end {
-                    runtime.vars.insert(loop_var.to_string(), i as f64);
-                    eval_stmts(stmts, runtime);
+                    frame.vars.insert(loop_var.to_string(), i as f64);
+                    eval_stmts(stmts, frame);
                 }
             }
             Statement::FnDef { name, args, stmts } => {
-                runtime.funcs.insert(
+                frame.funcs.insert(
                     name.to_string(),
                     FnDef::User(UserFn {
                         args: args.clone(),
@@ -224,31 +224,31 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDef<'a> {
     })
 }
 
-fn eval(expr: &Expression, runtime: &Runtime) -> f64 {
+fn eval(expr: &Expression, frame: &StackFrame) -> f64 {
     match expr {
         Expression::Ident("pi") => std::f64::consts::PI,
         Expression::Ident(id) => {
-            *runtime.vars.get(*id).expect("Variable not found")
+            *frame.vars.get(*id).expect("Variable not found")
         }
         Expression::NumLiteral(n) => *n,
         Expression::FnInvoke(name, args) => {
-            if let Some(func) = runtime.get_fn(*name) {
+            if let Some(func) = frame.get_fn(*name) {
                 let args: Vec<_> =
-                    args.iter().map(|arg| eval(arg, runtime)).collect();
-                func.call(&args, runtime)
+                    args.iter().map(|arg| eval(arg, frame)).collect();
+                func.call(&args, frame)
             } else {
                 panic!("Unknown function {name:?}");
             }
         }
-        Expression::Add(lhs, rhs) => eval(lhs, runtime) + eval(rhs, runtime),
-        Expression::Sub(lhs, rhs) => eval(lhs, runtime) - eval(rhs, runtime),
-        Expression::Mul(lhs, rhs) => eval(lhs, runtime) * eval(rhs, runtime),
-        Expression::Div(lhs, rhs) => eval(lhs, runtime) / eval(rhs, runtime),
+        Expression::Add(lhs, rhs) => eval(lhs, frame) + eval(rhs, frame),
+        Expression::Sub(lhs, rhs) => eval(lhs, frame) - eval(rhs, frame),
+        Expression::Mul(lhs, rhs) => eval(lhs, frame) * eval(rhs, frame),
+        Expression::Div(lhs, rhs) => eval(lhs, frame) / eval(rhs, frame),
         Expression::If(cond, t_case, f_case) => {
-            if eval(cond, runtime) != 0. {
-                eval(t_case, runtime)
+            if eval(cond, frame) != 0. {
+                eval(t_case, frame)
             } else if let Some(f_case) = f_case {
-                eval(f_case, runtime)
+                eval(f_case, frame)
             } else {
                 0.
             }
