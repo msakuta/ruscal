@@ -162,14 +162,6 @@ fn eval_stmts<'src>(
                         stmts: stmts.clone(),
                     }),
                 );
-                // let mut nested_runtime = Runtime {
-                //     vars: HashMap::new(),
-                //     funcs: HashMap::new(),
-                // };
-                // for arg in args {
-                //     nested_variables.insert(arg)
-                // }
-                // eval_stmts(stmts, &mut nested_variables);
             }
         }
     }
