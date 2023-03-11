@@ -1,0 +1,4 @@
+var one = 1;
+var a = if one { 1 } else { 2 };
+
+a + 2;
