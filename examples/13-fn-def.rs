@@ -1,0 +1,457 @@
+use std::{collections::HashMap, io::Read};
+
+use nom::{
+    branch::alt,
+    bytes::complete::tag,
+    character::complete::{
+        alpha1, alphanumeric1, char, multispace0, multispace1,
+    },
+    combinator::{opt, recognize},
+    multi::{fold_many0, many0, separated_list0},
+    number::complete::recognize_float,
+    sequence::{delimited, pair, preceded, terminated},
+    Finish, IResult,
+};
+
+fn main() {
+    let mut buf = String::new();
+    if !std::io::stdin().read_to_string(&mut buf).is_ok() {
+        panic!("Failed to read from stdin");
+    }
+    let parsed_statements = match statements_finish(&buf) {
+        Ok(parsed_statements) => parsed_statements,
+        Err(e) => {
+            eprintln!("Parse error: {e:?}");
+            return;
+        }
+    };
+
+    let mut runtime = Runtime::new();
+
+    eval_stmts(&parsed_statements, &mut runtime);
+}
+
+enum FnDef<'src> {
+    User(UserFn<'src>),
+    Native(NativeFn),
+}
+
+impl<'src> FnDef<'src> {
+    fn call(&self, args: &[f64], runtime: &Runtime) -> f64 {
+        match self {
+            Self::User(code) => {
+                let mut new_runtime = Runtime::push_stack(runtime);
+                new_runtime.vars = args
+                    .iter()
+                    .zip(code.args.iter())
+                    .map(|(arg, name)| (name.to_string(), *arg))
+                    .collect();
+                eval_stmts(&code.stmts, &mut new_runtime)
+            }
+            Self::Native(code) => (code.code)(args),
+        }
+    }
+}
+
+struct UserFn<'src> {
+    args: Vec<&'src str>,
+    stmts: Statements<'src>,
+}
+
+struct NativeFn {
+    code: Box<dyn Fn(&[f64]) -> f64>,
+}
+
+type Variables = HashMap<String, f64>;
+type Functions<'src> = HashMap<String, FnDef<'src>>;
+
+struct Runtime<'src> {
+    vars: Variables,
+    funcs: Functions<'src>,
+    uplevel: Option<&'src Runtime<'src>>,
+}
+
+impl<'src> Runtime<'src> {
+    fn new() -> Self {
+        let mut funcs = Functions::new();
+        funcs.insert("sqrt".to_string(), unary_fn(f64::sqrt));
+        funcs.insert("sin".to_string(), unary_fn(f64::sin));
+        funcs.insert("cos".to_string(), unary_fn(f64::cos));
+        funcs.insert("tan".to_string(), unary_fn(f64::tan));
+        funcs.insert("asin".to_string(), unary_fn(f64::asin));
+        funcs.insert("acos".to_string(), unary_fn(f64::acos));
+        funcs.insert("atan".to_string(), unary_fn(f64::atan));
+        funcs.insert("atan2".to_string(), binary_fn(f64::atan2));
+        funcs.insert("pow".to_string(), binary_fn(f64::powf));
+        funcs.insert("exp".to_string(), unary_fn(f64::exp));
+        funcs.insert("log".to_string(), binary_fn(f64::log));
+        funcs.insert("log10".to_string(), unary_fn(f64::log10));
+        funcs.insert(
+            "print".to_string(),
+            unary_fn(|arg| {
+                println!("print: {arg}");
+                0.
+            }),
+        );
+        Self {
+            vars: Variables::new(),
+            funcs,
+            uplevel: None,
+        }
+    }
+
+    fn push_stack(uplevel: &'src Self) -> Self {
+        Self {
+            vars: HashMap::new(),
+            funcs: HashMap::new(),
+            uplevel: Some(uplevel),
+        }
+    }
+
+    fn get_fn(&self, name: &str) -> Option<&FnDef<'src>> {
+        let mut next_frame = Some(self);
+        while let Some(frame) = next_frame {
+            if let Some(func) = frame.funcs.get(name) {
+                return Some(func);
+            }
+            next_frame = frame.uplevel;
+        }
+        None
+    }
+}
+
+fn eval_stmts<'src>(
+    stmts: &[Statement<'src>],
+    runtime: &mut Runtime<'src>,
+) -> f64 {
+    let mut last_result = 0.;
+    for statement in stmts {
+        match statement {
+            Statement::Expression(expr) => {
+                last_result = eval(expr, runtime);
+            }
+            Statement::VarDef(name, expr) => {
+                let value = eval(expr, runtime);
+                runtime.vars.insert(name.to_string(), value);
+            }
+            Statement::VarAssign(name, expr) => {
+                if !runtime.vars.contains_key(*name) {
+                    panic!("Variable is not defined");
+                }
+                let value = eval(expr, runtime);
+                runtime.vars.insert(name.to_string(), value);
+            }
+            Statement::For {
+                loop_var,
+                start,
+                end,
+                stmts,
+            } => {
+                let start = eval(start, runtime) as isize;
+                let end = eval(end, runtime) as isize;
+                for i in start..end {
+                    runtime.vars.insert(loop_var.to_string(), i as f64);
+                    eval_stmts(stmts, runtime);
+                }
+            }
+            Statement::FnDef { name, args, stmts } => {
+                runtime.funcs.insert(
+                    name.to_string(),
+                    FnDef::User(UserFn {
+                        args: args.clone(),
+                        stmts: stmts.clone(),
+                    }),
+                );
+                // let mut nested_runtime = Runtime {
+                //     vars: HashMap::new(),
+                //     funcs: HashMap::new(),
+                // };
+                // for arg in args {
+                //     nested_variables.insert(arg)
+                // }
+                // eval_stmts(stmts, &mut nested_variables);
+            }
+        }
+    }
+    last_result
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum Expression<'src> {
+    Ident(&'src str),
+    NumLiteral(f64),
+    FnInvoke(&'src str, Vec<Expression<'src>>),
+    Add(Box<Expression<'src>>, Box<Expression<'src>>),
+    Sub(Box<Expression<'src>>, Box<Expression<'src>>),
+    Mul(Box<Expression<'src>>, Box<Expression<'src>>),
+    Div(Box<Expression<'src>>, Box<Expression<'src>>),
+    If(
+        Box<Expression<'src>>,
+        Box<Expression<'src>>,
+        Option<Box<Expression<'src>>>,
+    ),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum Statement<'src> {
+    Expression(Expression<'src>),
+    VarDef(&'src str, Expression<'src>),
+    VarAssign(&'src str, Expression<'src>),
+    For {
+        loop_var: &'src str,
+        start: Expression<'src>,
+        end: Expression<'src>,
+        stmts: Statements<'src>,
+    },
+    FnDef {
+        name: &'src str,
+        args: Vec<&'src str>,
+        stmts: Statements<'src>,
+    },
+}
+
+type Statements<'a> = Vec<Statement<'a>>;
+
+fn unary_fn<'a>(f: fn(f64) -> f64) -> FnDef<'a> {
+    FnDef::Native(NativeFn {
+        code: Box::new(move |args| {
+            f(*args.into_iter().next().expect("function missing argument"))
+        }),
+    })
+}
+
+fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDef<'a> {
+    FnDef::Native(NativeFn {
+        code: Box::new(move |args| {
+            let mut args = args.into_iter();
+            let lhs = args.next().expect("function missing the first argument");
+            let rhs =
+                args.next().expect("function missing the second argument");
+            f(*lhs, *rhs)
+        }),
+    })
+}
+
+fn eval(expr: &Expression, runtime: &Runtime) -> f64 {
+    match expr {
+        Expression::Ident("pi") => std::f64::consts::PI,
+        Expression::Ident(id) => {
+            *runtime.vars.get(*id).expect("Variable not found")
+        }
+        Expression::NumLiteral(n) => *n,
+        Expression::FnInvoke(name, args) => {
+            if let Some(func) = runtime.get_fn(*name) {
+                let args: Vec<_> =
+                    args.iter().map(|arg| eval(arg, runtime)).collect();
+                func.call(&args, runtime)
+            } else {
+                panic!("Unknown function {name:?}");
+            }
+        }
+        Expression::Add(lhs, rhs) => eval(lhs, runtime) + eval(rhs, runtime),
+        Expression::Sub(lhs, rhs) => eval(lhs, runtime) - eval(rhs, runtime),
+        Expression::Mul(lhs, rhs) => eval(lhs, runtime) * eval(rhs, runtime),
+        Expression::Div(lhs, rhs) => eval(lhs, runtime) / eval(rhs, runtime),
+        Expression::If(cond, t_case, f_case) => {
+            if eval(cond, runtime) != 0. {
+                eval(t_case, runtime)
+            } else if let Some(f_case) = f_case {
+                eval(f_case, runtime)
+            } else {
+                0.
+            }
+        }
+    }
+}
+
+fn factor(i: &str) -> IResult<&str, Expression> {
+    alt((number, func_call, ident, parens))(i)
+}
+
+fn func_call(i: &str) -> IResult<&str, Expression> {
+    let (r, ident) = delimited(multispace0, identifier, multispace0)(i)?;
+    // println!("func_invoke ident: {}", ident);
+    let (r, args) = delimited(
+        multispace0,
+        delimited(
+            tag("("),
+            many0(delimited(
+                multispace0,
+                expr,
+                delimited(multispace0, opt(tag(",")), multispace0),
+            )),
+            tag(")"),
+        ),
+        multispace0,
+    )(r)?;
+    Ok((r, Expression::FnInvoke(ident, args)))
+}
+
+fn ident(input: &str) -> IResult<&str, Expression> {
+    let (r, res) = delimited(multispace0, identifier, multispace0)(input)?;
+    Ok((r, Expression::Ident(res)))
+}
+
+fn identifier(input: &str) -> IResult<&str, &str> {
+    recognize(pair(
+        alt((alpha1, tag("_"))),
+        many0(alt((alphanumeric1, tag("_")))),
+    ))(input)
+}
+
+fn number(input: &str) -> IResult<&str, Expression> {
+    let (r, v) = delimited(multispace0, recognize_float, multispace0)(input)?;
+    Ok((
+        r,
+        Expression::NumLiteral(v.parse().map_err(|_| {
+            nom::Err::Error(nom::error::Error {
+                input,
+                code: nom::error::ErrorKind::Digit,
+            })
+        })?),
+    ))
+}
+
+fn parens(i: &str) -> IResult<&str, Expression> {
+    delimited(
+        multispace0,
+        delimited(tag("("), expr, tag(")")),
+        multispace0,
+    )(i)
+}
+
+fn term(i: &str) -> IResult<&str, Expression> {
+    let (i, init) = factor(i)?;
+
+    fold_many0(
+        pair(
+            delimited(multispace0, alt((char('*'), char('/'))), multispace0),
+            factor,
+        ),
+        move || init.clone(),
+        |acc, (op, val): (char, Expression)| match op {
+            '*' => Expression::Mul(Box::new(acc), Box::new(val)),
+            '/' => Expression::Div(Box::new(acc), Box::new(val)),
+            _ => panic!(
+                "Multiplicative expression should have '*' or '/' operator"
+            ),
+        },
+    )(i)
+}
+
+fn num_expr(i: &str) -> IResult<&str, Expression> {
+    let (i, init) = term(i)?;
+
+    fold_many0(
+        pair(
+            delimited(multispace0, alt((char('+'), char('-'))), multispace0),
+            term,
+        ),
+        move || init.clone(),
+        |acc, (op, val): (char, Expression)| match op {
+            '+' => Expression::Add(Box::new(acc), Box::new(val)),
+            '-' => Expression::Sub(Box::new(acc), Box::new(val)),
+            _ => panic!("Additive expression should have '+' or '-' operator"),
+        },
+    )(i)
+}
+
+fn open_brace(i: &str) -> IResult<&str, ()> {
+    let (i, _) = delimited(multispace0, char('{'), multispace0)(i)?;
+    Ok((i, ()))
+}
+
+fn close_brace(i: &str) -> IResult<&str, ()> {
+    let (i, _) = delimited(multispace0, char('}'), multispace0)(i)?;
+    Ok((i, ()))
+}
+
+fn if_expr(i: &str) -> IResult<&str, Expression> {
+    let (i, _) = delimited(multispace0, tag("if"), multispace0)(i)?;
+    let (i, cond) = expr(i)?;
+    let (i, t_case) = delimited(open_brace, expr, close_brace)(i)?;
+    let (i, f_case) = opt(preceded(
+        delimited(multispace0, tag("else"), multispace0),
+        delimited(open_brace, expr, close_brace),
+    ))(i)?;
+
+    Ok((
+        i,
+        Expression::If(Box::new(cond), Box::new(t_case), f_case.map(Box::new)),
+    ))
+}
+
+fn expr(i: &str) -> IResult<&str, Expression> {
+    alt((if_expr, num_expr))(i)
+}
+
+fn var_def(i: &str) -> IResult<&str, Statement> {
+    let (i, _) = delimited(multispace0, tag("var"), multispace1)(i)?;
+    let (i, name) = delimited(multispace0, identifier, multispace0)(i)?;
+    let (i, _) = delimited(multispace0, char('='), multispace0)(i)?;
+    let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
+    Ok((i, Statement::VarDef(name, expr)))
+}
+
+fn var_assign(i: &str) -> IResult<&str, Statement> {
+    let (i, name) = delimited(multispace0, identifier, multispace0)(i)?;
+    let (i, _) = delimited(multispace0, char('='), multispace0)(i)?;
+    let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
+    Ok((i, Statement::VarAssign(name, expr)))
+}
+
+fn expr_statement(i: &str) -> IResult<&str, Statement> {
+    let (i, res) = expr(i)?;
+    Ok((i, Statement::Expression(res)))
+}
+
+fn for_statement(i: &str) -> IResult<&str, Statement> {
+    let (i, _) = delimited(multispace0, tag("for"), multispace0)(i)?;
+    let (i, loop_var) = delimited(multispace0, identifier, multispace0)(i)?;
+    let (i, _) = delimited(multispace0, tag("in"), multispace0)(i)?;
+    let (i, start) = delimited(multispace0, expr, multispace0)(i)?;
+    let (i, _) = delimited(multispace0, tag("to"), multispace0)(i)?;
+    let (i, end) = delimited(multispace0, expr, multispace0)(i)?;
+    let (i, stmts) = delimited(open_brace, statements, close_brace)(i)?;
+    Ok((
+        i,
+        Statement::For {
+            loop_var,
+            start,
+            end,
+            stmts,
+        },
+    ))
+}
+
+fn fn_def_statement(i: &str) -> IResult<&str, Statement> {
+    let (i, _) = delimited(multispace0, tag("fn"), multispace0)(i)?;
+    let (i, name) = delimited(multispace0, identifier, multispace0)(i)?;
+    let (i, _) = delimited(multispace0, tag("("), multispace0)(i)?;
+    let (i, args) = separated_list0(
+        char(','),
+        delimited(multispace0, identifier, multispace0),
+    )(i)?;
+    let (i, _) = delimited(multispace0, tag(")"), multispace0)(i)?;
+    let (i, stmts) = delimited(open_brace, statements, close_brace)(i)?;
+    Ok((i, Statement::FnDef { name, args, stmts }))
+}
+
+fn statement(i: &str) -> IResult<&str, Statement> {
+    alt((
+        for_statement,
+        fn_def_statement,
+        terminated(alt((var_def, var_assign, expr_statement)), char(';')),
+    ))(i)
+}
+
+fn statements(i: &str) -> IResult<&str, Statements> {
+    let (i, stmts) = many0(statement)(i)?;
+    let (i, _) = opt(char(';'))(i)?;
+    Ok((i, stmts))
+}
+
+fn statements_finish(i: &str) -> Result<Statements, nom::error::Error<&str>> {
+    let (_, res) = statements(i).finish()?;
+    Ok(res)
+}

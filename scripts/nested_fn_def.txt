@@ -1,0 +1,11 @@
+
+fn process() {
+    fn add(a, b) {
+        cos(a) + b;
+    }
+
+    add(1, 2);
+}
+
+print(cos(1));
+print(process());
