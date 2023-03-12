@@ -1,0 +1,9 @@
+
+fn early_return(a, b) {
+    if a < b {
+        return a;
+    };
+    b;
+}
+
+print(early_return(1, 2));
