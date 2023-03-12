@@ -162,7 +162,9 @@ fn eval_stmts<'src>(
                             last_result = EvalResult::Continue(val)
                         }
                         EvalResult::Break(BreakResult::Return(val)) => {
-                            return EvalResult::Break(BreakResult::Return(val))
+                            return EvalResult::Break(BreakResult::Return(
+                                val,
+                            ))
                         }
                         EvalResult::Break(BreakResult::Break) => break,
                     };
@@ -242,7 +244,8 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDef<'a> {
     FnDef::Native(NativeFn {
         code: Box::new(move |args| {
             let mut args = args.into_iter();
-            let lhs = args.next().expect("function missing the first argument");
+            let lhs =
+                args.next().expect("function missing the first argument");
             let rhs =
                 args.next().expect("function missing the second argument");
             f(*lhs, *rhs)
@@ -398,7 +401,9 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
         |acc, (op, val): (char, Expression)| match op {
             '+' => Expression::Add(Box::new(acc), Box::new(val)),
             '-' => Expression::Sub(Box::new(acc), Box::new(val)),
-            _ => panic!("Additive expression should have '+' or '-' operator"),
+            _ => {
+                panic!("Additive expression should have '+' or '-' operator")
+            }
         },
     )(i)
 }
@@ -439,7 +444,11 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
 
     Ok((
         i,
-        Expression::If(Box::new(cond), Box::new(t_case), f_case.map(Box::new)),
+        Expression::If(
+            Box::new(cond),
+            Box::new(t_case),
+            f_case.map(Box::new),
+        ),
     ))
 }
 

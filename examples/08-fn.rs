@@ -172,7 +172,9 @@ fn expr(i: &str) -> IResult<&str, Expression> {
         |acc, (op, val): (char, Expression)| match op {
             '+' => Expression::Add(Box::new(acc), Box::new(val)),
             '-' => Expression::Sub(Box::new(acc), Box::new(val)),
-            _ => panic!("Additive expression should have '+' or '-' operator"),
+            _ => {
+                panic!("Additive expression should have '+' or '-' operator")
+            }
         },
     )(i)
 }

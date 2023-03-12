@@ -119,7 +119,9 @@ fn eval(expr: Expression, vars: &HashMap<&str, f64>) -> f64 {
         Expression::FnInvoke("pow", args) => binary_fn(f64::powf)(args, vars),
         Expression::FnInvoke("exp", args) => unary_fn(f64::exp)(args, vars),
         Expression::FnInvoke("log", args) => binary_fn(f64::log)(args, vars),
-        Expression::FnInvoke("log10", args) => unary_fn(f64::log10)(args, vars),
+        Expression::FnInvoke("log10", args) => {
+            unary_fn(f64::log10)(args, vars)
+        }
         Expression::FnInvoke(name, _) => panic!("Unknown function {name:?}"),
         Expression::Add(lhs, rhs) => eval(*lhs, vars) + eval(*rhs, vars),
         Expression::Sub(lhs, rhs) => eval(*lhs, vars) - eval(*rhs, vars),
@@ -224,7 +226,9 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
         |acc, (op, val): (char, Expression)| match op {
             '+' => Expression::Add(Box::new(acc), Box::new(val)),
             '-' => Expression::Sub(Box::new(acc), Box::new(val)),
-            _ => panic!("Additive expression should have '+' or '-' operator"),
+            _ => {
+                panic!("Additive expression should have '+' or '-' operator")
+            }
         },
     )(i)
 }
@@ -250,7 +254,11 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
 
     Ok((
         i,
-        Expression::If(Box::new(cond), Box::new(t_case), f_case.map(Box::new)),
+        Expression::If(
+            Box::new(cond),
+            Box::new(t_case),
+            f_case.map(Box::new),
+        ),
     ))
 }
 
