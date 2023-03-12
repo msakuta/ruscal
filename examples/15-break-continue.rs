@@ -52,6 +52,9 @@ impl<'src> FnDef<'src> {
           EvalResult::Break(BreakResult::Break) => {
             panic!("Breaking outside loop is prohibited")
           }
+          EvalResult::Break(BreakResult::Continue) => {
+            panic!("Continuing outside loop is prohibited")
+          }
         }
       }
       Self::Native(code) => (code.code)(args),
@@ -167,6 +170,9 @@ fn eval_stmts<'src>(
               ))
             }
             EvalResult::Break(BreakResult::Break) => break,
+            EvalResult::Break(BreakResult::Continue) => {
+              continue
+            }
           };
         }
       }
@@ -186,6 +192,9 @@ fn eval_stmts<'src>(
       }
       Statement::Break => {
         return EvalResult::Break(BreakResult::Break);
+      }
+      Statement::Continue => {
+        return EvalResult::Break(BreakResult::Continue);
       }
     }
   }
@@ -228,6 +237,7 @@ enum Statement<'src> {
   },
   Return(Expression<'src>),
   Break,
+  Continue,
 }
 
 type Statements<'a> = Vec<Statement<'a>>;
@@ -262,6 +272,7 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDef<'a> {
 enum BreakResult {
   Return(f64),
   Break,
+  Continue,
 }
 
 type EvalResult = ControlFlow<BreakResult, f64>;
@@ -574,6 +585,12 @@ fn break_statement(i: &str) -> IResult<&str, Statement> {
   Ok((i, Statement::Break))
 }
 
+fn continue_statement(i: &str) -> IResult<&str, Statement> {
+  let (i, _) =
+    delimited(multispace0, tag("continue"), multispace0)(i)?;
+  Ok((i, Statement::Continue))
+}
+
 fn general_statement<'a>(
   last: bool,
 ) -> impl Fn(&'a str) -> IResult<&'a str, Statement> {
@@ -593,6 +610,7 @@ fn general_statement<'a>(
       for_statement,
       terminated(return_statement, terminator),
       terminated(break_statement, terminator),
+      terminated(continue_statement, terminator),
       terminated(expr_statement, terminator),
     ))(input)
   }
