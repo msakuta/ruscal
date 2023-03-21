@@ -1,0 +1,20 @@
+WHITESPACE = _{ " " | NEWLINE }
+LPAREN = _{ "(" }
+RPAREN = _{ ")" }
+
+number = @{ (ASCII_DIGIT | "." | "-")+ }
+ident = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+value = { number | ident }
+
+factor = _{ value | LPAREN ~ expr ~ RPAREN }
+times = { "*" }
+divides = { "/" }
+product = { factor ~ ((times | divides) ~ factor)* }
+add = { "+" }
+subtract = { "-" }
+sum = { product ~ ((add | subtract) ~ product)* }
+expr = _{ sum }
+
+file = { SOI ~ (expr)* ~ EOI }
+
+AB = { ( "ab" | "a" ) ~ "c" }

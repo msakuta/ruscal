@@ -122,10 +122,8 @@ fn expr(i: &str) -> IResult<&str, Expression> {
 
   fold_many0(
     pair(
-      delimited(
-        multispace0,
+      space_delimited(
         alt((char('+'), char('-'))),
-        multispace0,
       ),
       term,
     ),
