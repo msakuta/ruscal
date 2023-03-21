@@ -7,10 +7,11 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
   },
   combinator::{opt, recognize},
+  error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
   sequence::{delimited, pair, preceded},
-  Finish, IResult,
+  Finish, IResult, Parser,
 };
 
 fn main() {
@@ -104,6 +105,15 @@ fn binary_fn(
     );
     f(lhs, rhs)
   }
+}
+
+fn space_delimited<'src, O, E>(
+  f: impl Parser<&'src str, O, E>,
+) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+where
+  E: ParseError<&'src str>,
+{
+  delimited(multispace0, f, multispace0)
 }
 
 fn eval(expr: Expression, vars: &HashMap<&str, f64>) -> f64 {
@@ -286,25 +296,22 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
 }
 
 fn open_brace(i: &str) -> IResult<&str, ()> {
-  let (i, _) =
-    delimited(multispace0, char('{'), multispace0)(i)?;
+  let (i, _) = space_delimited(char('{'))(i)?;
   Ok((i, ()))
 }
 
 fn close_brace(i: &str) -> IResult<&str, ()> {
-  let (i, _) =
-    delimited(multispace0, char('}'), multispace0)(i)?;
+  let (i, _) = space_delimited(char('}'))(i)?;
   Ok((i, ()))
 }
 
 fn if_expr(i: &str) -> IResult<&str, Expression> {
-  let (i, _) =
-    delimited(multispace0, tag("if"), multispace0)(i)?;
+  let (i, _) = space_delimited(tag("if"))(i)?;
   let (i, cond) = expr(i)?;
   let (i, t_case) =
     delimited(open_brace, expr, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
-    delimited(multispace0, tag("else"), multispace0),
+    space_delimited(tag("else")),
     delimited(open_brace, expr, close_brace),
   ))(i)?;
 

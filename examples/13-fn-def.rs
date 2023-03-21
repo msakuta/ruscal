@@ -7,10 +7,11 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
   },
   combinator::{opt, recognize},
+  error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
   sequence::{delimited, pair, preceded, terminated},
-  Finish, IResult,
+  Finish, IResult, Parser,
 };
 
 fn main() {
@@ -86,13 +87,7 @@ impl<'src> StackFrame<'src> {
     funcs.insert("exp".to_string(), unary_fn(f64::exp));
     funcs.insert("log".to_string(), binary_fn(f64::log));
     funcs.insert("log10".to_string(), unary_fn(f64::log10));
-    funcs.insert(
-      "print".to_string(),
-      unary_fn(|arg| {
-        println!("print: {arg}");
-        0.
-      }),
-    );
+    funcs.insert("print".to_string(), unary_fn(print));
     Self {
       vars: Variables::new(),
       funcs,
@@ -118,6 +113,11 @@ impl<'src> StackFrame<'src> {
     }
     None
   }
+}
+
+fn print(arg: f64) -> f64 {
+  println!("print: {arg}");
+  0.
 }
 
 fn eval_stmts<'src>(
@@ -230,6 +230,15 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDef<'a> {
   })
 }
 
+fn space_delimited<'src, O, E>(
+  f: impl Parser<&'src str, O, E>,
+) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+where
+  E: ParseError<&'src str>,
+{
+  delimited(multispace0, f, multispace0)
+}
+
 fn eval(expr: &Expression, frame: &StackFrame) -> f64 {
   match expr {
     Expression::Ident("pi") => std::f64::consts::PI,
@@ -275,28 +284,21 @@ fn factor(i: &str) -> IResult<&str, Expression> {
 }
 
 fn func_call(i: &str) -> IResult<&str, Expression> {
-  let (r, ident) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  // println!("func_invoke ident: {}", ident);
-  let (r, args) = delimited(
-    multispace0,
-    delimited(
-      tag("("),
-      many0(delimited(
-        multispace0,
-        expr,
-        delimited(multispace0, opt(tag(",")), multispace0),
-      )),
-      tag(")"),
-    ),
-    multispace0,
-  )(r)?;
+  let (r, ident) = space_delimited(identifier)(i)?;
+  let (r, args) = space_delimited(delimited(
+    tag("("),
+    many0(delimited(
+      multispace0,
+      expr,
+      space_delimited(opt(tag(","))),
+    )),
+    tag(")"),
+  ))(r)?;
   Ok((r, Expression::FnInvoke(ident, args)))
 }
 
 fn ident(input: &str) -> IResult<&str, Expression> {
-  let (r, res) =
-    delimited(multispace0, identifier, multispace0)(input)?;
+  let (r, res) = space_delimited(identifier)(input)?;
   Ok((r, Expression::Ident(res)))
 }
 
@@ -308,10 +310,7 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 }
 
 fn number(input: &str) -> IResult<&str, Expression> {
-  let (r, v) =
-    delimited(multispace0, recognize_float, multispace0)(
-      input,
-    )?;
+  let (r, v) = space_delimited(recognize_float)(input)?;
   Ok((
     r,
     Expression::NumLiteral(v.parse().map_err(|_| {
@@ -324,25 +323,14 @@ fn number(input: &str) -> IResult<&str, Expression> {
 }
 
 fn parens(i: &str) -> IResult<&str, Expression> {
-  delimited(
-    multispace0,
-    delimited(tag("("), expr, tag(")")),
-    multispace0,
-  )(i)
+  space_delimited(delimited(tag("("), expr, tag(")")))(i)
 }
 
 fn term(i: &str) -> IResult<&str, Expression> {
   let (i, init) = factor(i)?;
 
   fold_many0(
-    pair(
-      delimited(
-        multispace0,
-        alt((char('*'), char('/'))),
-        multispace0,
-      ),
-      factor,
-    ),
+    pair(space_delimited(alt((char('*'), char('/')))), factor),
     move || init.clone(),
     |acc, (op, val): (char, Expression)| match op {
       '*' => Expression::Mul(Box::new(acc), Box::new(val)),
@@ -467,20 +455,13 @@ fn for_statement(i: &str) -> IResult<&str, Statement> {
 }
 
 fn fn_def_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("fn"), multispace0)(i)?;
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("("), multispace0)(i)?;
-  let (i, args) = separated_list0(
-    char(','),
-    delimited(multispace0, identifier, multispace0),
-  )(i)?;
-  let (i, _) =
-    delimited(multispace0, tag(")"), multispace0)(i)?;
-  let (i, stmts) =
-    delimited(open_brace, statements, close_brace)(i)?;
+  let (i, _) = space_delimited(tag("fn"))(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(tag("("))(i)?;
+  let (i, args) =
+    separated_list0(char(','), space_delimited(identifier))(i)?;
+  let (i, _) = space_delimited(tag(")"))(i)?;
+  let (i, stmts) = space_delimited(statements)(i)?;
   Ok((i, Statement::FnDef { name, args, stmts }))
 }
 

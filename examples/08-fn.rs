@@ -7,10 +7,11 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0,
   },
   combinator::{opt, recognize},
+  error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
   sequence::{delimited, pair},
-  Finish, IResult,
+  Finish, IResult, Parser,
 };
 
 fn main() {
@@ -74,54 +75,40 @@ fn binary_fn(
 }
 
 fn eval(expr: Expression) -> f64 {
+  use Expression::*;
   match expr {
-    Expression::Ident("pi") => std::f64::consts::PI,
-    Expression::Ident(id) => panic!("Unknown name {:?}", id),
-    Expression::NumLiteral(n) => n,
-    Expression::FnInvoke("sqrt", args) => {
-      unary_fn(f64::sqrt)(args)
-    }
-    Expression::FnInvoke("sin", args) => {
-      unary_fn(f64::sin)(args)
-    }
-    Expression::FnInvoke("cos", args) => {
-      unary_fn(f64::cos)(args)
-    }
-    Expression::FnInvoke("tan", args) => {
-      unary_fn(f64::tan)(args)
-    }
-    Expression::FnInvoke("asin", args) => {
-      unary_fn(f64::asin)(args)
-    }
-    Expression::FnInvoke("acos", args) => {
-      unary_fn(f64::acos)(args)
-    }
-    Expression::FnInvoke("atan", args) => {
-      unary_fn(f64::atan)(args)
-    }
-    Expression::FnInvoke("atan2", args) => {
-      binary_fn(f64::atan2)(args)
-    }
-    Expression::FnInvoke("pow", args) => {
-      binary_fn(f64::powf)(args)
-    }
-    Expression::FnInvoke("exp", args) => {
-      unary_fn(f64::exp)(args)
-    }
-    Expression::FnInvoke("log", args) => {
-      binary_fn(f64::log)(args)
-    }
-    Expression::FnInvoke("log10", args) => {
-      unary_fn(f64::log10)(args)
-    }
-    Expression::FnInvoke(name, _) => {
+    Ident("pi") => std::f64::consts::PI,
+    Ident(id) => panic!("Unknown name {:?}", id),
+    NumLiteral(n) => n,
+    FnInvoke("sqrt", args) => unary_fn(f64::sqrt)(args),
+    FnInvoke("sin", args) => unary_fn(f64::sin)(args),
+    FnInvoke("cos", args) => unary_fn(f64::cos)(args),
+    FnInvoke("tan", args) => unary_fn(f64::tan)(args),
+    FnInvoke("asin", args) => unary_fn(f64::asin)(args),
+    FnInvoke("acos", args) => unary_fn(f64::acos)(args),
+    FnInvoke("atan", args) => unary_fn(f64::atan)(args),
+    FnInvoke("atan2", args) => binary_fn(f64::atan2)(args),
+    FnInvoke("pow", args) => binary_fn(f64::powf)(args),
+    FnInvoke("exp", args) => unary_fn(f64::exp)(args),
+    FnInvoke("log", args) => binary_fn(f64::log)(args),
+    FnInvoke("log10", args) => unary_fn(f64::log10)(args),
+    FnInvoke(name, _) => {
       panic!("Unknown function {name:?}")
     }
-    Expression::Add(lhs, rhs) => eval(*lhs) + eval(*rhs),
-    Expression::Sub(lhs, rhs) => eval(*lhs) - eval(*rhs),
-    Expression::Mul(lhs, rhs) => eval(*lhs) * eval(*rhs),
-    Expression::Div(lhs, rhs) => eval(*lhs) / eval(*rhs),
+    Add(lhs, rhs) => eval(*lhs) + eval(*rhs),
+    Sub(lhs, rhs) => eval(*lhs) - eval(*rhs),
+    Mul(lhs, rhs) => eval(*lhs) * eval(*rhs),
+    Div(lhs, rhs) => eval(*lhs) / eval(*rhs),
   }
+}
+
+fn space_delimited<'src, O, E>(
+  f: impl Parser<&'src str, O, E>,
+) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+where
+  E: ParseError<&'src str>,
+{
+  delimited(multispace0, f, multispace0)
 }
 
 fn factor(i: &str) -> IResult<&str, Expression> {
@@ -129,22 +116,17 @@ fn factor(i: &str) -> IResult<&str, Expression> {
 }
 
 fn func_call(i: &str) -> IResult<&str, Expression> {
-  let (r, ident) =
-    delimited(multispace0, identifier, multispace0)(i)?;
+  let (r, ident) = space_delimited(identifier)(i)?;
   // println!("func_invoke ident: {}", ident);
-  let (r, args) = delimited(
-    multispace0,
-    delimited(
-      tag("("),
-      many0(delimited(
-        multispace0,
-        expr,
-        delimited(multispace0, opt(tag(",")), multispace0),
-      )),
-      tag(")"),
-    ),
-    multispace0,
-  )(r)?;
+  let (r, args) = space_delimited(delimited(
+    tag("("),
+    many0(delimited(
+      multispace0,
+      expr,
+      space_delimited(opt(tag(","))),
+    )),
+    tag(")"),
+  ))(r)?;
   Ok((r, Expression::FnInvoke(ident, args)))
 }
 

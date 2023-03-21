@@ -7,10 +7,11 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
   },
   combinator::{opt, recognize},
+  error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
   sequence::{delimited, pair},
-  Finish, IResult,
+  Finish, IResult, Parser,
 };
 
 fn main() {
@@ -101,64 +102,42 @@ fn binary_fn(
   }
 }
 
+fn space_delimited<'src, O, E>(
+  f: impl Parser<&'src str, O, E>,
+) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+where
+  E: ParseError<&'src str>,
+{
+  delimited(multispace0, f, multispace0)
+}
+
 fn eval(expr: Expression, vars: &HashMap<&str, f64>) -> f64 {
+  use Expression::*;
   match expr {
-    Expression::Ident("pi") => std::f64::consts::PI,
-    Expression::Ident(id) => {
-      *vars.get(id).expect("Variable not found")
-    }
-    Expression::NumLiteral(n) => n,
-    Expression::FnInvoke("sqrt", args) => {
-      unary_fn(f64::sqrt)(args, vars)
-    }
-    Expression::FnInvoke("sin", args) => {
-      unary_fn(f64::sin)(args, vars)
-    }
-    Expression::FnInvoke("cos", args) => {
-      unary_fn(f64::cos)(args, vars)
-    }
-    Expression::FnInvoke("tan", args) => {
-      unary_fn(f64::tan)(args, vars)
-    }
-    Expression::FnInvoke("asin", args) => {
-      unary_fn(f64::asin)(args, vars)
-    }
-    Expression::FnInvoke("acos", args) => {
-      unary_fn(f64::acos)(args, vars)
-    }
-    Expression::FnInvoke("atan", args) => {
-      unary_fn(f64::atan)(args, vars)
-    }
-    Expression::FnInvoke("atan2", args) => {
+    Ident("pi") => std::f64::consts::PI,
+    Ident(id) => *vars.get(id).expect("Variable not found"),
+    NumLiteral(n) => n,
+    FnInvoke("sqrt", args) => unary_fn(f64::sqrt)(args, vars),
+    FnInvoke("sin", args) => unary_fn(f64::sin)(args, vars),
+    FnInvoke("cos", args) => unary_fn(f64::cos)(args, vars),
+    FnInvoke("tan", args) => unary_fn(f64::tan)(args, vars),
+    FnInvoke("asin", args) => unary_fn(f64::asin)(args, vars),
+    FnInvoke("acos", args) => unary_fn(f64::acos)(args, vars),
+    FnInvoke("atan", args) => unary_fn(f64::atan)(args, vars),
+    FnInvoke("atan2", args) => {
       binary_fn(f64::atan2)(args, vars)
     }
-    Expression::FnInvoke("pow", args) => {
-      binary_fn(f64::powf)(args, vars)
-    }
-    Expression::FnInvoke("exp", args) => {
-      unary_fn(f64::exp)(args, vars)
-    }
-    Expression::FnInvoke("log", args) => {
-      binary_fn(f64::log)(args, vars)
-    }
-    Expression::FnInvoke("log10", args) => {
-      unary_fn(f64::log10)(args, vars)
-    }
-    Expression::FnInvoke(name, _) => {
+    FnInvoke("pow", args) => binary_fn(f64::powf)(args, vars),
+    FnInvoke("exp", args) => unary_fn(f64::exp)(args, vars),
+    FnInvoke("log", args) => binary_fn(f64::log)(args, vars),
+    FnInvoke("log10", args) => unary_fn(f64::log10)(args, vars),
+    FnInvoke(name, _) => {
       panic!("Unknown function {name:?}")
     }
-    Expression::Add(lhs, rhs) => {
-      eval(*lhs, vars) + eval(*rhs, vars)
-    }
-    Expression::Sub(lhs, rhs) => {
-      eval(*lhs, vars) - eval(*rhs, vars)
-    }
-    Expression::Mul(lhs, rhs) => {
-      eval(*lhs, vars) * eval(*rhs, vars)
-    }
-    Expression::Div(lhs, rhs) => {
-      eval(*lhs, vars) / eval(*rhs, vars)
-    }
+    Add(lhs, rhs) => eval(*lhs, vars) + eval(*rhs, vars),
+    Sub(lhs, rhs) => eval(*lhs, vars) - eval(*rhs, vars),
+    Mul(lhs, rhs) => eval(*lhs, vars) * eval(*rhs, vars),
+    Div(lhs, rhs) => eval(*lhs, vars) / eval(*rhs, vars),
   }
 }
 
@@ -283,11 +262,9 @@ fn var_def(i: &str) -> IResult<&str, Statement> {
 }
 
 fn var_assign(i: &str) -> IResult<&str, Statement> {
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, char('='), multispace0)(i)?;
-  let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(char('='))(i)?;
+  let (i, expr) = space_delimited(expr)(i)?;
   Ok((i, Statement::VarAssign(name, expr)))
 }
 

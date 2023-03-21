@@ -239,12 +239,6 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDef<'a> {
   })
 }
 
-// #[derive(Debug)]
-// enum EvalResult {
-//     Yield(f64),
-//     Return(f64),
-// }
-
 type EvalResult = ControlFlow<f64, f64>;
 
 fn eval<'src>(
