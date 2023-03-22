@@ -177,12 +177,12 @@ fn term(i: &str) -> IResult<&str, Expression> {
     move || init.clone(),
     |acc, (op, val): (char, Expression)| {
       match op {
-            '*' => Expression::Mul(Box::new(acc), Box::new(val)),
-            '/' => Expression::Div(Box::new(acc), Box::new(val)),
-            _ => panic!(
-                "Multiplicative expression should have '*' or '/' operator"
-            ),
-        }
+        '*' => Expression::Mul(Box::new(acc), Box::new(val)),
+        '/' => Expression::Div(Box::new(acc), Box::new(val)),
+        _ => panic!(
+            "Multiplicative expression should have '*' or '/' operator"
+        ),
+      }
     },
   )(i)
 }

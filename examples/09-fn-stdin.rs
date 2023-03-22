@@ -130,8 +130,7 @@ fn func_call(i: &str) -> IResult<&str, Expression> {
 }
 
 fn ident(input: &str) -> IResult<&str, Expression> {
-  let (r, res) =
-    delimited(multispace0, identifier, multispace0)(input)?;
+  let (r, res) = space_delimited(identifier)(input)?;
   Ok((r, Expression::Ident(res)))
 }
 
@@ -143,10 +142,7 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 }
 
 fn number(input: &str) -> IResult<&str, Expression> {
-  let (r, v) =
-    delimited(multispace0, recognize_float, multispace0)(
-      input,
-    )?;
+  let (r, v) = space_delimited(recognize_float)(input)?;
   Ok((
     r,
     Expression::NumLiteral(v.parse().map_err(|_| {
@@ -159,31 +155,22 @@ fn number(input: &str) -> IResult<&str, Expression> {
 }
 
 fn parens(i: &str) -> IResult<&str, Expression> {
-  delimited(
-    multispace0,
-    delimited(tag("("), expr, tag(")")),
-    multispace0,
-  )(i)
+  space_delimited(delimited(tag("("), expr, tag(")")))(i)
 }
 
 fn term(i: &str) -> IResult<&str, Expression> {
   let (i, init) = factor(i)?;
 
   fold_many0(
-    pair(
-      delimited(
-        multispace0,
-        alt((char('*'), char('/'))),
-        multispace0,
-      ),
-      factor,
-    ),
+    pair(space_delimited(alt((char('*'), char('/')))), factor),
     move || init.clone(),
-    |acc, (op, val): (char, Expression)| match op {
-      '*' => Expression::Mul(Box::new(acc), Box::new(val)),
-      '/' => Expression::Div(Box::new(acc), Box::new(val)),
-      _ => {
-        panic!("Multiplicative expression should have '*' or '/' operator")
+    |acc, (op, val): (char, Expression)| {
+      match op {
+        '*' => Expression::Mul(Box::new(acc), Box::new(val)),
+        '/' => Expression::Div(Box::new(acc), Box::new(val)),
+        _ => panic!(
+            "Multiplicative expression should have '*' or '/' operator"
+        ),
       }
     },
   )(i)
@@ -193,14 +180,7 @@ fn expr(i: &str) -> IResult<&str, Expression> {
   let (i, init) = term(i)?;
 
   fold_many0(
-    pair(
-      delimited(
-        multispace0,
-        alt((char('+'), char('-'))),
-        multispace0,
-      ),
-      term,
-    ),
+    pair(space_delimited(alt((char('+'), char('-')))), term),
     move || init.clone(),
     |acc, (op, val): (char, Expression)| match op {
       '+' => Expression::Add(Box::new(acc), Box::new(val)),
