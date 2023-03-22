@@ -121,12 +121,7 @@ fn expr(i: &str) -> IResult<&str, Expression> {
   let (i, init) = term(i)?;
 
   fold_many0(
-    pair(
-      space_delimited(
-        alt((char('+'), char('-'))),
-      ),
-      term,
-    ),
+    pair(space_delimited(alt((char('+'), char('-')))), term),
     move || init.clone(),
     |acc, (op, val): (char, Expression)| match op {
       '+' => Expression::Add(Box::new(acc), Box::new(val)),

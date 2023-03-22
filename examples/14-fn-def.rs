@@ -461,7 +461,8 @@ fn fn_def_statement(i: &str) -> IResult<&str, Statement> {
   let (i, args) =
     separated_list0(char(','), space_delimited(identifier))(i)?;
   let (i, _) = space_delimited(tag(")"))(i)?;
-  let (i, stmts) = space_delimited(statements)(i)?;
+  let (i, stmts) =
+    delimited(open_brace, statements, close_brace)(i)?;
   Ok((i, Statement::FnDef { name, args, stmts }))
 }
 

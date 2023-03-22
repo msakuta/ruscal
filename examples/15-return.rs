@@ -7,10 +7,11 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
   },
   combinator::{opt, recognize},
+  error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
   sequence::{delimited, pair, preceded, terminated},
-  Finish, IResult,
+  Finish, IResult, Parser,
 };
 
 fn main() {
@@ -302,6 +303,15 @@ fn eval<'src>(
   EvalResult::Continue(res)
 }
 
+fn space_delimited<'src, O, E>(
+  f: impl Parser<&'src str, O, E>,
+) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+where
+  E: ParseError<&'src str>,
+{
+  delimited(multispace0, f, multispace0)
+}
+
 fn factor(i: &str) -> IResult<&str, Expression> {
   alt((number, func_call, ident, parens))(i)
 }
@@ -519,27 +529,20 @@ fn for_statement(i: &str) -> IResult<&str, Statement> {
 }
 
 fn fn_def_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("fn"), multispace0)(i)?;
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("("), multispace0)(i)?;
-  let (i, args) = separated_list0(
-    char(','),
-    delimited(multispace0, identifier, multispace0),
-  )(i)?;
-  let (i, _) =
-    delimited(multispace0, tag(")"), multispace0)(i)?;
+  let (i, _) = space_delimited(tag("fn"))(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(tag("("))(i)?;
+  let (i, args) =
+    separated_list0(char(','), space_delimited(identifier))(i)?;
+  let (i, _) = space_delimited(tag(")"))(i)?;
   let (i, stmts) =
     delimited(open_brace, statements, close_brace)(i)?;
   Ok((i, Statement::FnDef { name, args, stmts }))
 }
 
 fn return_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("return"), multispace0)(i)?;
-  let (i, ex) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, _) = space_delimited(tag("return"))(i)?;
+  let (i, ex) = space_delimited(expr)(i)?;
   Ok((i, Statement::Return(ex)))
 }
 

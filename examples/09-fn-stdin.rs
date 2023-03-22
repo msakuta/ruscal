@@ -117,7 +117,6 @@ fn factor(i: &str) -> IResult<&str, Expression> {
 
 fn func_call(i: &str) -> IResult<&str, Expression> {
   let (r, ident) = space_delimited(identifier)(i)?;
-  // println!("func_invoke ident: {}", ident);
   let (r, args) = space_delimited(delimited(
     tag("("),
     many0(delimited(
@@ -206,11 +205,9 @@ fn expr(i: &str) -> IResult<&str, Expression> {
     |acc, (op, val): (char, Expression)| match op {
       '+' => Expression::Add(Box::new(acc), Box::new(val)),
       '-' => Expression::Sub(Box::new(acc), Box::new(val)),
-      _ => {
-        panic!(
-          "Additive expression should have '+' or '-' operator"
-        )
-      }
+      _ => panic!(
+        "Additive expression should have '+' or '-' operator"
+      ),
     },
   )(i)
 }
