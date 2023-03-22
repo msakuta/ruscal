@@ -1,3 +1,5 @@
+use std::io::Read;
+
 use nom::{
   branch::alt,
   bytes::complete::tag,
@@ -6,42 +8,27 @@ use nom::{
   },
   combinator::{opt, recognize},
   error::ParseError,
-  multi::{fold_many0, many0},
+  multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
   sequence::{delimited, pair},
-  IResult, Parser,
+  Finish, IResult, Parser,
 };
 
 fn main() {
-  fn ex_eval<'src>(
-    input: &'src str,
-  ) -> Result<f64, nom::Err<nom::error::Error<&'src str>>> {
-    expr(input).map(|(_, e)| eval(e))
+  let mut buf = String::new();
+  if std::io::stdin().read_to_string(&mut buf).is_ok() {
+    let parsed_statements = match statements(&buf) {
+      Ok(parsed_statements) => parsed_statements,
+      Err(e) => {
+        eprintln!("Parse error: {e:?}");
+        return;
+      }
+    };
+
+    for statement in parsed_statements {
+      println!("eval: {:?}", eval(statement));
+    }
   }
-
-  let input = "123";
-  println!("source: {:?}, parsed: {:?}", input, ex_eval(input));
-
-  let input = "2 * pi";
-  println!("source: {:?}, parsed: {:?}", input, ex_eval(input));
-
-  let input = "(123 + 456 ) + pi";
-  println!("source: {:?}, parsed: {:?}", input, ex_eval(input));
-
-  let input = "10 - (100 + 1)";
-  println!("source: {:?}, parsed: {:?}", input, ex_eval(input));
-
-  let input = "(3 + 7) / (2 + 3)";
-  println!("source: {:?}, parsed: {:?}", input, ex_eval(input));
-
-  let input = "sqrt(2) / 2";
-  println!("source: {:?}, parsed: {:?}", input, ex_eval(input));
-
-  let input = "sin(pi / 4)";
-  println!("source: {:?}, parsed: {:?}", input, ex_eval(input));
-
-  let input = "atan2(1, 1)";
-  println!("source: {:?}, parsed: {:?}", input, ex_eval(input));
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -54,6 +41,8 @@ enum Expression<'src> {
   Mul(Box<Expression<'src>>, Box<Expression<'src>>),
   Div(Box<Expression<'src>>, Box<Expression<'src>>),
 }
+
+type Statements<'a> = Vec<Expression<'a>>;
 
 fn unary_fn(
   f: fn(f64) -> f64,
@@ -128,6 +117,7 @@ fn factor(i: &str) -> IResult<&str, Expression> {
 
 fn func_call(i: &str) -> IResult<&str, Expression> {
   let (r, ident) = space_delimited(identifier)(i)?;
+  // println!("func_invoke ident: {}", ident);
   let (r, args) = space_delimited(delimited(
     tag("("),
     many0(delimited(
@@ -190,14 +180,12 @@ fn term(i: &str) -> IResult<&str, Expression> {
       factor,
     ),
     move || init.clone(),
-    |acc, (op, val): (char, Expression)| {
-      match op {
-            '*' => Expression::Mul(Box::new(acc), Box::new(val)),
-            '/' => Expression::Div(Box::new(acc), Box::new(val)),
-            _ => panic!(
-                "Multiplicative expression should have '*' or '/' operator"
-            ),
-        }
+    |acc, (op, val): (char, Expression)| match op {
+      '*' => Expression::Mul(Box::new(acc), Box::new(val)),
+      '/' => Expression::Div(Box::new(acc), Box::new(val)),
+      _ => {
+        panic!("Multiplicative expression should have '*' or '/' operator")
+      }
     },
   )(i)
 }
@@ -218,9 +206,18 @@ fn expr(i: &str) -> IResult<&str, Expression> {
     |acc, (op, val): (char, Expression)| match op {
       '+' => Expression::Add(Box::new(acc), Box::new(val)),
       '-' => Expression::Sub(Box::new(acc), Box::new(val)),
-      _ => panic!(
-        "Additive expression should have '+' or '-' operator"
-      ),
+      _ => {
+        panic!(
+          "Additive expression should have '+' or '-' operator"
+        )
+      }
     },
   )(i)
+}
+
+fn statements(
+  i: &str,
+) -> Result<Statements, nom::error::Error<&str>> {
+  let (_, res) = separated_list0(tag(";"), expr)(i).finish()?;
+  Ok(res)
 }

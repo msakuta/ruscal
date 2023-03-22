@@ -30,6 +30,7 @@ fn main() {
   let mut tc_ctx = TypeCheckContext::new();
 
   type_check(&parsed_statements, &mut tc_ctx).unwrap();
+  println!("Type check OK");
 
   let mut frame = StackFrame::new();
 
