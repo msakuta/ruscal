@@ -102,15 +102,6 @@ fn binary_fn(
   }
 }
 
-fn space_delimited<'src, O, E>(
-  f: impl Parser<&'src str, O, E>,
-) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
-where
-  E: ParseError<&'src str>,
-{
-  delimited(multispace0, f, multispace0)
-}
-
 fn eval(expr: Expression, vars: &HashMap<&str, f64>) -> f64 {
   use Expression::*;
   match expr {
@@ -141,33 +132,35 @@ fn eval(expr: Expression, vars: &HashMap<&str, f64>) -> f64 {
   }
 }
 
+fn space_delimited<'src, O, E>(
+  f: impl Parser<&'src str, O, E>,
+) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+where
+  E: ParseError<&'src str>,
+{
+  delimited(multispace0, f, multispace0)
+}
+
 fn factor(i: &str) -> IResult<&str, Expression> {
   alt((number, func_call, ident, parens))(i)
 }
 
 fn func_call(i: &str) -> IResult<&str, Expression> {
-  let (r, ident) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  // println!("func_invoke ident: {}", ident);
-  let (r, args) = delimited(
-    multispace0,
-    delimited(
-      tag("("),
-      many0(delimited(
-        multispace0,
-        expr,
-        delimited(multispace0, opt(tag(",")), multispace0),
-      )),
-      tag(")"),
-    ),
-    multispace0,
-  )(r)?;
+  let (r, ident) = space_delimited(identifier)(i)?;
+  let (r, args) = space_delimited(delimited(
+    tag("("),
+    many0(delimited(
+      multispace0,
+      expr,
+      space_delimited(opt(tag(","))),
+    )),
+    tag(")"),
+  ))(r)?;
   Ok((r, Expression::FnInvoke(ident, args)))
 }
 
 fn ident(input: &str) -> IResult<&str, Expression> {
-  let (r, res) =
-    delimited(multispace0, identifier, multispace0)(input)?;
+  let (r, res) = space_delimited(identifier)(input)?;
   Ok((r, Expression::Ident(res)))
 }
 
@@ -179,10 +172,7 @@ fn identifier(input: &str) -> IResult<&str, &str> {
 }
 
 fn number(input: &str) -> IResult<&str, Expression> {
-  let (r, v) =
-    delimited(multispace0, recognize_float, multispace0)(
-      input,
-    )?;
+  let (r, v) = space_delimited(recognize_float)(input)?;
   Ok((
     r,
     Expression::NumLiteral(v.parse().map_err(|_| {
@@ -195,31 +185,22 @@ fn number(input: &str) -> IResult<&str, Expression> {
 }
 
 fn parens(i: &str) -> IResult<&str, Expression> {
-  delimited(
-    multispace0,
-    delimited(tag("("), expr, tag(")")),
-    multispace0,
-  )(i)
+  space_delimited(delimited(tag("("), expr, tag(")")))(i)
 }
 
 fn term(i: &str) -> IResult<&str, Expression> {
   let (i, init) = factor(i)?;
 
   fold_many0(
-    pair(
-      delimited(
-        multispace0,
-        alt((char('*'), char('/'))),
-        multispace0,
-      ),
-      factor,
-    ),
+    pair(space_delimited(alt((char('*'), char('/')))), factor),
     move || init.clone(),
-    |acc, (op, val): (char, Expression)| match op {
+    |acc, (op, val): (char, Expression)| {
+      match op {
       '*' => Expression::Mul(Box::new(acc), Box::new(val)),
       '/' => Expression::Div(Box::new(acc), Box::new(val)),
-      _ => {
-        panic!("Multiplicative expression should have '*' or '/' operator")
+        _ => panic!(
+            "Multiplicative expression should have '*' or '/' operator"
+        ),
       }
     },
   )(i)
@@ -229,14 +210,7 @@ fn expr(i: &str) -> IResult<&str, Expression> {
   let (i, init) = term(i)?;
 
   fold_many0(
-    pair(
-      delimited(
-        multispace0,
-        alt((char('+'), char('-'))),
-        multispace0,
-      ),
-      term,
-    ),
+    pair(space_delimited(alt((char('+'), char('-')))), term),
     move || init.clone(),
     |acc, (op, val): (char, Expression)| match op {
       '+' => Expression::Add(Box::new(acc), Box::new(val)),
@@ -253,11 +227,9 @@ fn expr(i: &str) -> IResult<&str, Expression> {
 fn var_def(i: &str) -> IResult<&str, Statement> {
   let (i, _) =
     delimited(multispace0, tag("var"), multispace1)(i)?;
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, char('='), multispace0)(i)?;
-  let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(char('='))(i)?;
+  let (i, expr) = space_delimited(expr)(i)?;
   Ok((i, Statement::VarDef(name, expr)))
 }
 

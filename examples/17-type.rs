@@ -8,10 +8,11 @@ use nom::{
     none_of,
   },
   combinator::{opt, recognize},
+  error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
   sequence::{delimited, pair, preceded, terminated},
-  Finish, IResult,
+  Finish, IResult, Parser,
 };
 
 fn main() {
@@ -231,23 +232,13 @@ impl<'src> StackFrame<'src> {
     funcs.insert(
       "print".to_string(),
       FnDef::Native(NativeFn {
-        code: Box::new(move |args| {
-          let val =
-            args.first().expect("function missing argument");
-          println!("print: {val}");
-          Value::I64(0)
-        }),
+        code: Box::new(print),
       }),
     );
     funcs.insert(
       "dbg".to_string(),
       FnDef::Native(NativeFn {
-        code: Box::new(move |args| {
-          let val =
-            args.first().expect("function missing argument");
-          println!("dbg: {val:?}");
-          Value::I64(0)
-        }),
+        code: Box::new(p_dbg),
       }),
     );
     funcs.insert(
@@ -306,6 +297,16 @@ impl<'src> StackFrame<'src> {
     }
     None
   }
+}
+
+fn print(values: &[Value]) -> Value {
+  println!("print: {}", values[0]);
+  Value::I64(0)
+}
+
+fn p_dbg(values: &[Value]) -> Value {
+  println!("dbg: {:?}", values[0]);
+  Value::I64(0)
 }
 
 fn eval_stmts<'src>(
@@ -473,14 +474,15 @@ fn eval<'src>(
   expr: &Expression<'src>,
   frame: &mut StackFrame<'src>,
 ) -> EvalResult {
+  use Expression::*;
   let res = match expr {
-    Expression::Ident("pi") => Value::F64(std::f64::consts::PI),
-    Expression::Ident(id) => {
+    Ident("pi") => Value::F64(std::f64::consts::PI),
+    Ident(id) => {
       frame.vars.get(*id).cloned().expect("Variable not found")
     }
-    Expression::NumLiteral(n) => Value::F64(*n),
-    Expression::StrLiteral(s) => Value::Str(s.clone()),
-    Expression::FnInvoke(name, args) => {
+    NumLiteral(n) => Value::F64(*n),
+    StrLiteral(s) => Value::Str(s.clone()),
+    FnInvoke(name, args) => {
       let mut arg_vals = vec![];
       for arg in args.iter() {
         arg_vals.push(eval(arg, frame)?);
@@ -492,33 +494,25 @@ fn eval<'src>(
         panic!("Unknown function {name:?}");
       }
     }
-    Expression::Add(lhs, rhs) => {
-      eval(lhs, frame)? + eval(rhs, frame)?
-    }
-    Expression::Sub(lhs, rhs) => {
-      eval(lhs, frame)? - eval(rhs, frame)?
-    }
-    Expression::Mul(lhs, rhs) => {
-      eval(lhs, frame)? * eval(rhs, frame)?
-    }
-    Expression::Div(lhs, rhs) => {
-      eval(lhs, frame)? / eval(rhs, frame)?
-    }
-    Expression::Gt(lhs, rhs) => {
+    Add(lhs, rhs) => eval(lhs, frame)? + eval(rhs, frame)?,
+    Sub(lhs, rhs) => eval(lhs, frame)? - eval(rhs, frame)?,
+    Mul(lhs, rhs) => eval(lhs, frame)? * eval(rhs, frame)?,
+    Div(lhs, rhs) => eval(lhs, frame)? / eval(rhs, frame)?,
+    Gt(lhs, rhs) => {
       if eval(lhs, frame)? > eval(rhs, frame)? {
         Value::I64(1)
       } else {
         Value::I64(0)
       }
     }
-    Expression::Lt(lhs, rhs) => {
+    Lt(lhs, rhs) => {
       if eval(lhs, frame)? < eval(rhs, frame)? {
         Value::I64(1)
       } else {
         Value::I64(0)
       }
     }
-    Expression::If(cond, t_case, f_case) => {
+    If(cond, t_case, f_case) => {
       if coerce_i64(&eval(cond, frame)?) != 0 {
         eval_stmts(t_case, frame)?
       } else if let Some(f_case) = f_case {
@@ -531,33 +525,35 @@ fn eval<'src>(
   EvalResult::Continue(res)
 }
 
+fn space_delimited<'src, O, E>(
+  f: impl Parser<&'src str, O, E>,
+) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+where
+  E: ParseError<&'src str>,
+{
+  delimited(multispace0, f, multispace0)
+}
+
 fn factor(i: &str) -> IResult<&str, Expression> {
   alt((str_literal, num_literal, func_call, ident, parens))(i)
 }
 
 fn func_call(i: &str) -> IResult<&str, Expression> {
-  let (r, ident) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  // println!("func_invoke ident: {}", ident);
-  let (r, args) = delimited(
-    multispace0,
-    delimited(
-      tag("("),
-      many0(delimited(
-        multispace0,
-        expr,
-        delimited(multispace0, opt(tag(",")), multispace0),
-      )),
-      tag(")"),
-    ),
-    multispace0,
-  )(r)?;
+  let (r, ident) = space_delimited(identifier)(i)?;
+  let (r, args) = space_delimited(delimited(
+    tag("("),
+    many0(delimited(
+      multispace0,
+      expr,
+      space_delimited(opt(tag(","))),
+    )),
+    tag(")"),
+  ))(r)?;
   Ok((r, Expression::FnInvoke(ident, args)))
 }
 
 fn ident(input: &str) -> IResult<&str, Expression> {
-  let (r, res) =
-    delimited(multispace0, identifier, multispace0)(input)?;
+  let (r, res) = space_delimited(identifier)(input)?;
   Ok((r, Expression::Ident(res)))
 }
 
@@ -585,10 +581,7 @@ fn str_literal(i: &str) -> IResult<&str, Expression> {
 }
 
 fn num_literal(input: &str) -> IResult<&str, Expression> {
-  let (r, v) =
-    delimited(multispace0, recognize_float, multispace0)(
-      input,
-    )?;
+  let (r, v) = space_delimited(recognize_float)(input)?;
   Ok((
     r,
     Expression::NumLiteral(v.parse().map_err(|_| {
@@ -601,31 +594,22 @@ fn num_literal(input: &str) -> IResult<&str, Expression> {
 }
 
 fn parens(i: &str) -> IResult<&str, Expression> {
-  delimited(
-    multispace0,
-    delimited(tag("("), expr, tag(")")),
-    multispace0,
-  )(i)
+  space_delimited(delimited(tag("("), expr, tag(")")))(i)
 }
 
 fn term(i: &str) -> IResult<&str, Expression> {
   let (i, init) = factor(i)?;
 
   fold_many0(
-    pair(
-      delimited(
-        multispace0,
-        alt((char('*'), char('/'))),
-        multispace0,
-      ),
-      factor,
-    ),
+    pair(space_delimited(alt((char('*'), char('/')))), factor),
     move || init.clone(),
-    |acc, (op, val): (char, Expression)| match op {
+    |acc, (op, val): (char, Expression)| {
+      match op {
       '*' => Expression::Mul(Box::new(acc), Box::new(val)),
       '/' => Expression::Div(Box::new(acc), Box::new(val)),
-      _ => {
-        panic!("Multiplicative expression should have '*' or '/' operator")
+        _ => panic!(
+            "Multiplicative expression should have '*' or '/' operator"
+        ),
       }
     },
   )(i)
@@ -635,14 +619,7 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
   let (i, init) = term(i)?;
 
   fold_many0(
-    pair(
-      delimited(
-        multispace0,
-        alt((char('+'), char('-'))),
-        multispace0,
-      ),
-      term,
-    ),
+    pair(space_delimited(alt((char('+'), char('-')))), term),
     move || init.clone(),
     |acc, (op, val): (char, Expression)| match op {
       '+' => Expression::Add(Box::new(acc), Box::new(val)),
@@ -658,11 +635,8 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
 
 fn cond_expr(i: &str) -> IResult<&str, Expression> {
   let (i, first) = num_expr(i)?;
-  let (i, cond) = delimited(
-    multispace0,
-    alt((char('<'), char('>'))),
-    multispace0,
-  )(i)?;
+  let (i, cond) =
+    space_delimited(alt((char('<'), char('>'))))(i)?;
   let (i, second) = num_expr(i)?;
   Ok((
     i,
@@ -675,25 +649,22 @@ fn cond_expr(i: &str) -> IResult<&str, Expression> {
 }
 
 fn open_brace(i: &str) -> IResult<&str, ()> {
-  let (i, _) =
-    delimited(multispace0, char('{'), multispace0)(i)?;
+  let (i, _) = space_delimited(char('{'))(i)?;
   Ok((i, ()))
 }
 
 fn close_brace(i: &str) -> IResult<&str, ()> {
-  let (i, _) =
-    delimited(multispace0, char('}'), multispace0)(i)?;
+  let (i, _) = space_delimited(char('}'))(i)?;
   Ok((i, ()))
 }
 
 fn if_expr(i: &str) -> IResult<&str, Expression> {
-  let (i, _) =
-    delimited(multispace0, tag("if"), multispace0)(i)?;
+  let (i, _) = space_delimited(tag("if"))(i)?;
   let (i, cond) = expr(i)?;
   let (i, t_case) =
     delimited(open_brace, statements, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
-    delimited(multispace0, tag("else"), multispace0),
+    space_delimited(tag("else")),
     delimited(open_brace, statements, close_brace),
   ))(i)?;
 
@@ -714,22 +685,17 @@ fn expr(i: &str) -> IResult<&str, Expression> {
 fn var_def(i: &str) -> IResult<&str, Statement> {
   let (i, _) =
     delimited(multispace0, tag("var"), multispace1)(i)?;
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, char('='), multispace0)(i)?;
-  let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, char(';'), multispace0)(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(char('='))(i)?;
+  let (i, expr) = space_delimited(expr)(i)?;
+  let (i, _) = space_delimited(char(';'))(i)?;
   Ok((i, Statement::VarDef(name, expr)))
 }
 
 fn var_assign(i: &str) -> IResult<&str, Statement> {
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, char('='), multispace0)(i)?;
-  let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(char('='))(i)?;
+  let (i, expr) = space_delimited(expr)(i)?;
   Ok((i, Statement::VarAssign(name, expr)))
 }
 
@@ -739,17 +705,12 @@ fn expr_statement(i: &str) -> IResult<&str, Statement> {
 }
 
 fn for_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("for"), multispace0)(i)?;
-  let (i, loop_var) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("in"), multispace0)(i)?;
-  let (i, start) =
-    delimited(multispace0, expr, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("to"), multispace0)(i)?;
-  let (i, end) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, _) = space_delimited(tag("for"))(i)?;
+  let (i, loop_var) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(tag("in"))(i)?;
+  let (i, start) = space_delimited(expr)(i)?;
+  let (i, _) = space_delimited(tag("to"))(i)?;
+  let (i, end) = space_delimited(expr)(i)?;
   let (i, stmts) =
     delimited(open_brace, statements, close_brace)(i)?;
   Ok((
@@ -764,39 +725,30 @@ fn for_statement(i: &str) -> IResult<&str, Statement> {
 }
 
 fn fn_def_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("fn"), multispace0)(i)?;
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("("), multispace0)(i)?;
-  let (i, args) = separated_list0(
-    char(','),
-    delimited(multispace0, identifier, multispace0),
-  )(i)?;
-  let (i, _) =
-    delimited(multispace0, tag(")"), multispace0)(i)?;
+  let (i, _) = space_delimited(tag("fn"))(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(tag("("))(i)?;
+  let (i, args) =
+    separated_list0(char(','), space_delimited(identifier))(i)?;
+  let (i, _) = space_delimited(tag(")"))(i)?;
   let (i, stmts) =
     delimited(open_brace, statements, close_brace)(i)?;
   Ok((i, Statement::FnDef { name, args, stmts }))
 }
 
 fn return_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("return"), multispace0)(i)?;
-  let (i, ex) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, _) = space_delimited(tag("return"))(i)?;
+  let (i, ex) = space_delimited(expr)(i)?;
   Ok((i, Statement::Return(ex)))
 }
 
 fn break_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("break"), multispace0)(i)?;
+  let (i, _) = space_delimited(tag("break"))(i)?;
   Ok((i, Statement::Break))
 }
 
 fn continue_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("continue"), multispace0)(i)?;
+  let (i, _) = space_delimited(tag("continue"))(i)?;
   Ok((i, Statement::Continue))
 }
 

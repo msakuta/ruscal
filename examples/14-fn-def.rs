@@ -230,23 +230,15 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDef<'a> {
   })
 }
 
-fn space_delimited<'src, O, E>(
-  f: impl Parser<&'src str, O, E>,
-) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
-where
-  E: ParseError<&'src str>,
-{
-  delimited(multispace0, f, multispace0)
-}
-
 fn eval(expr: &Expression, frame: &StackFrame) -> f64 {
+  use Expression::*;
   match expr {
-    Expression::Ident("pi") => std::f64::consts::PI,
-    Expression::Ident(id) => {
+    Ident("pi") => std::f64::consts::PI,
+    Ident(id) => {
       *frame.vars.get(*id).expect("Variable not found")
     }
-    Expression::NumLiteral(n) => *n,
-    Expression::FnInvoke(name, args) => {
+    NumLiteral(n) => *n,
+    FnInvoke(name, args) => {
       if let Some(func) = frame.get_fn(*name) {
         let args: Vec<_> =
           args.iter().map(|arg| eval(arg, frame)).collect();
@@ -255,19 +247,11 @@ fn eval(expr: &Expression, frame: &StackFrame) -> f64 {
         panic!("Unknown function {name:?}");
       }
     }
-    Expression::Add(lhs, rhs) => {
-      eval(lhs, frame) + eval(rhs, frame)
-    }
-    Expression::Sub(lhs, rhs) => {
-      eval(lhs, frame) - eval(rhs, frame)
-    }
-    Expression::Mul(lhs, rhs) => {
-      eval(lhs, frame) * eval(rhs, frame)
-    }
-    Expression::Div(lhs, rhs) => {
-      eval(lhs, frame) / eval(rhs, frame)
-    }
-    Expression::If(cond, t_case, f_case) => {
+    Add(lhs, rhs) => eval(lhs, frame) + eval(rhs, frame),
+    Sub(lhs, rhs) => eval(lhs, frame) - eval(rhs, frame),
+    Mul(lhs, rhs) => eval(lhs, frame) * eval(rhs, frame),
+    Div(lhs, rhs) => eval(lhs, frame) / eval(rhs, frame),
+    If(cond, t_case, f_case) => {
       if eval(cond, frame) != 0. {
         eval(t_case, frame)
       } else if let Some(f_case) = f_case {
@@ -277,6 +261,15 @@ fn eval(expr: &Expression, frame: &StackFrame) -> f64 {
       }
     }
   }
+}
+
+fn space_delimited<'src, O, E>(
+  f: impl Parser<&'src str, O, E>,
+) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+where
+  E: ParseError<&'src str>,
+{
+  delimited(multispace0, f, multispace0)
 }
 
 fn factor(i: &str) -> IResult<&str, Expression> {
@@ -332,11 +325,13 @@ fn term(i: &str) -> IResult<&str, Expression> {
   fold_many0(
     pair(space_delimited(alt((char('*'), char('/')))), factor),
     move || init.clone(),
-    |acc, (op, val): (char, Expression)| match op {
+    |acc, (op, val): (char, Expression)| {
+      match op {
       '*' => Expression::Mul(Box::new(acc), Box::new(val)),
       '/' => Expression::Div(Box::new(acc), Box::new(val)),
-      _ => {
-        panic!("Multiplicative expression should have '*' or '/' operator")
+        _ => panic!(
+            "Multiplicative expression should have '*' or '/' operator"
+        ),
       }
     },
   )(i)
@@ -346,14 +341,7 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
   let (i, init) = term(i)?;
 
   fold_many0(
-    pair(
-      delimited(
-        multispace0,
-        alt((char('+'), char('-'))),
-        multispace0,
-      ),
-      term,
-    ),
+    pair(space_delimited(alt((char('+'), char('-')))), term),
     move || init.clone(),
     |acc, (op, val): (char, Expression)| match op {
       '+' => Expression::Add(Box::new(acc), Box::new(val)),
@@ -368,25 +356,22 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
 }
 
 fn open_brace(i: &str) -> IResult<&str, ()> {
-  let (i, _) =
-    delimited(multispace0, char('{'), multispace0)(i)?;
+  let (i, _) = space_delimited(char('{'))(i)?;
   Ok((i, ()))
 }
 
 fn close_brace(i: &str) -> IResult<&str, ()> {
-  let (i, _) =
-    delimited(multispace0, char('}'), multispace0)(i)?;
+  let (i, _) = space_delimited(char('}'))(i)?;
   Ok((i, ()))
 }
 
 fn if_expr(i: &str) -> IResult<&str, Expression> {
-  let (i, _) =
-    delimited(multispace0, tag("if"), multispace0)(i)?;
+  let (i, _) = space_delimited(tag("if"))(i)?;
   let (i, cond) = expr(i)?;
   let (i, t_case) =
     delimited(open_brace, expr, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
-    delimited(multispace0, tag("else"), multispace0),
+    space_delimited(tag("else")),
     delimited(open_brace, expr, close_brace),
   ))(i)?;
 
@@ -407,20 +392,16 @@ fn expr(i: &str) -> IResult<&str, Expression> {
 fn var_def(i: &str) -> IResult<&str, Statement> {
   let (i, _) =
     delimited(multispace0, tag("var"), multispace1)(i)?;
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, char('='), multispace0)(i)?;
-  let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(char('='))(i)?;
+  let (i, expr) = space_delimited(expr)(i)?;
   Ok((i, Statement::VarDef(name, expr)))
 }
 
 fn var_assign(i: &str) -> IResult<&str, Statement> {
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, char('='), multispace0)(i)?;
-  let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(char('='))(i)?;
+  let (i, expr) = space_delimited(expr)(i)?;
   Ok((i, Statement::VarAssign(name, expr)))
 }
 
@@ -430,17 +411,12 @@ fn expr_statement(i: &str) -> IResult<&str, Statement> {
 }
 
 fn for_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("for"), multispace0)(i)?;
-  let (i, loop_var) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("in"), multispace0)(i)?;
-  let (i, start) =
-    delimited(multispace0, expr, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("to"), multispace0)(i)?;
-  let (i, end) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, _) = space_delimited(tag("for"))(i)?;
+  let (i, loop_var) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(tag("in"))(i)?;
+  let (i, start) = space_delimited(expr)(i)?;
+  let (i, _) = space_delimited(tag("to"))(i)?;
+  let (i, end) = space_delimited(expr)(i)?;
   let (i, stmts) =
     delimited(open_brace, statements, close_brace)(i)?;
   Ok((
