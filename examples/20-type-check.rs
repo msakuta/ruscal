@@ -269,16 +269,15 @@ impl TypeCheckError {
   }
 }
 
-fn tc_binary_op_gen<'src, 'ast>(
-  lhs: &'ast Expression<'src>,
-  rhs: &'ast Expression<'src>,
+fn tc_binary_op<'src>(
+  lhs: &Expression<'src>,
+  rhs: &Expression<'src>,
   ctx: &mut TypeCheckContext<'src>,
   op: &str,
-  mut f: impl FnMut(&TypeDecl, &TypeDecl) -> Result<TypeDecl, ()>,
 ) -> Result<TypeDecl, TypeCheckError> {
   let lhst = tc_expr(lhs, ctx)?;
   let rhst = tc_expr(rhs, ctx)?;
-  f(&lhst, &rhst).map_err(|()| {
+  binary_op_type(&lhst, &rhst).map_err(|_| {
     TypeCheckError::new(format!(
       "Operation {op} between incompatible type: {:?} and {:?}",
       lhst, rhst,
@@ -286,29 +285,19 @@ fn tc_binary_op_gen<'src, 'ast>(
   })
 }
 
-fn tc_binary_op<'src>(
-  lhs: &Expression<'src>,
-  rhs: &Expression<'src>,
-  ctx: &mut TypeCheckContext<'src>,
-  op: &str,
-) -> Result<TypeDecl, TypeCheckError> {
-  tc_binary_op_gen(lhs, rhs, ctx, op, binary_op_type)
-}
-
 fn binary_op_type(
   lhs: &TypeDecl,
   rhs: &TypeDecl,
 ) -> Result<TypeDecl, ()> {
   use TypeDecl::*;
-  let res = match (&lhs, &rhs) {
+  Ok(match (lhs, rhs) {
     (Any, _) => Any,
     (_, Any) => Any,
     (I64, I64) => I64,
     (F64 | I64, F64 | I64) => F64,
     (Str, Str) => Str,
     _ => return Err(()),
-  };
-  Ok(res)
+  })
 }
 
 fn tc_binary_cmp<'src>(
@@ -317,24 +306,22 @@ fn tc_binary_cmp<'src>(
   ctx: &mut TypeCheckContext<'src>,
   op: &str,
 ) -> Result<TypeDecl, TypeCheckError> {
-  tc_binary_op_gen(lhs, rhs, ctx, op, binary_cmp_type)
-}
-
-/// Binary comparison operator type check. It will always return i32, which is used as a bool in this language.
-fn binary_cmp_type(
-  lhs: &TypeDecl,
-  rhs: &TypeDecl,
-) -> Result<TypeDecl, ()> {
   use TypeDecl::*;
-  let res = match (&lhs, &rhs) {
+  let lhst = tc_expr(lhs, ctx)?;
+  let rhst = tc_expr(rhs, ctx)?;
+  Ok(match (&lhst, &rhst) {
     (Any, _) => I64,
     (_, Any) => I64,
     (F64, F64) => I64,
     (I64, I64) => I64,
     (Str, Str) => I64,
-    _ => return Err(()),
-  };
-  Ok(res)
+    _ => {
+      return Err(TypeCheckError::new(format!(
+      "Operation {op} between incompatible type: {:?} and {:?}",
+      lhst, rhst,
+    )))
+    }
+  })
 }
 
 fn tc_expr<'src>(
