@@ -373,10 +373,10 @@ fn tc_expr<'src>(
       if let Some(false_type) = false_branch {
         let false_type = type_check(false_type, ctx)?;
         binary_op_type(&true_type, &false_type).map_err(|_| {
-                    TypeCheckError::new(
-                        format!("Conditional expression doesn't have the compatible types in true and false branch: {:?} and {:?}", true_type, false_type),
-                    )
-                })?
+          TypeCheckError::new(
+            format!("Conditional expression doesn't have the compatible types in true and false branch: {:?} and {:?}", true_type, false_type),
+          )
+        })?
       } else {
         true_type
       }
