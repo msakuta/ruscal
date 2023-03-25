@@ -204,7 +204,7 @@ pub struct TypeCheckContext<'src> {
 }
 
 impl<'src> TypeCheckContext<'src> {
-  pub fn new(source_file: Option<&'src str>) -> Self {
+  pub fn new() -> Self {
     Self {
       vars: HashMap::new(),
       funcs: HashMap::new(),
@@ -354,12 +354,16 @@ impl<'src> StackFrame<'src> {
     funcs.insert(
       "print".to_string(),
       FnDef::Native(NativeFn {
+        args: vec![("arg", TypeDecl::Any)],
+        ret_type: TypeDecl::Any,
         code: Box::new(print),
       }),
     );
     funcs.insert(
       "dbg".to_string(),
       FnDef::Native(NativeFn {
+        args: vec![("arg", TypeDecl::Any)],
+        ret_type: TypeDecl::Any,
         code: Box::new(p_dbg),
       }),
     );
@@ -830,11 +834,9 @@ fn var_def(i: &str) -> IResult<&str, Statement> {
 }
 
 fn var_assign(i: &str) -> IResult<&str, Statement> {
-  let (i, name) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, char('='), multispace0)(i)?;
-  let (i, expr) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(char('='))(i)?;
+  let (i, expr) = space_delimited(expr)(i)?;
   Ok((i, Statement::VarAssign(name, expr)))
 }
 
@@ -844,17 +846,12 @@ fn expr_statement(i: &str) -> IResult<&str, Statement> {
 }
 
 fn for_statement(i: &str) -> IResult<&str, Statement> {
-  let (i, _) =
-    delimited(multispace0, tag("for"), multispace0)(i)?;
-  let (i, loop_var) =
-    delimited(multispace0, identifier, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("in"), multispace0)(i)?;
-  let (i, start) =
-    delimited(multispace0, expr, multispace0)(i)?;
-  let (i, _) =
-    delimited(multispace0, tag("to"), multispace0)(i)?;
-  let (i, end) = delimited(multispace0, expr, multispace0)(i)?;
+  let (i, _) = space_delimited(tag("for"))(i)?;
+  let (i, loop_var) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(tag("in"))(i)?;
+  let (i, start) = space_delimited(expr)(i)?;
+  let (i, _) = space_delimited(tag("to"))(i)?;
+  let (i, end) = space_delimited(expr)(i)?;
   let (i, stmts) =
     delimited(open_brace, statements, close_brace)(i)?;
   Ok((
