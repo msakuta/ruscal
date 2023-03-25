@@ -165,7 +165,7 @@ impl std::ops::Div for Value {
   }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TypeDecl {
   Any,
   F64,
@@ -255,17 +255,16 @@ fn tc_expr<'src, 'b>(
   e: &'b Expression<'src>,
   ctx: &mut TypeCheckContext<'src>,
 ) -> Result<TypeDecl, TypeCheckError> {
+  use Expression::*;
   Ok(match &e {
-    Expression::NumLiteral(_val) => TypeDecl::F64,
-    Expression::StrLiteral(_val) => TypeDecl::Str,
-    Expression::Ident(str) => {
-      ctx.get_var(str).ok_or_else(|| {
-        TypeCheckError::new(format!(
-          "Variable {} not found in scope",
-          str
-        ))
-      })?
-    }
+    NumLiteral(_val) => TypeDecl::F64,
+    StrLiteral(_val) => TypeDecl::Str,
+    Ident(str) => ctx.get_var(str).ok_or_else(|| {
+      TypeCheckError::new(format!(
+        "Variable {} not found in scope",
+        str
+      ))
+    })?,
     _ => todo!(),
   })
 }
@@ -494,12 +493,17 @@ fn eval_stmts<'src>(
           };
         }
       }
-      Statement::FnDef { name, args, stmts } => {
+      Statement::FnDef {
+        name,
+        args,
+        ret_type,
+        stmts,
+      } => {
         frame.funcs.insert(
           name.to_string(),
           FnDef::User(UserFn {
             args: args.clone(),
-            ret_type: TypeDecl::Any,
+            ret_type: *ret_type,
             stmts: stmts.clone(),
           }),
         );
@@ -553,6 +557,7 @@ enum Statement<'src> {
   FnDef {
     name: &'src str,
     args: Vec<(&'src str, TypeDecl)>,
+    ret_type: TypeDecl,
     stmts: Statements<'src>,
   },
   Return(Expression<'src>),
@@ -579,7 +584,7 @@ fn unary_fn<'a>(f: fn(f64) -> f64) -> FnDef<'a> {
 
 fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDef<'a> {
   FnDef::Native(NativeFn {
-    args: vec![("arg", TypeDecl::F64)],
+    args: vec![("lhs", TypeDecl::F64), ("rhs", TypeDecl::F64)],
     ret_type: TypeDecl::F64,
     code: Box::new(move |args| {
       let mut args = args.into_iter();
@@ -895,9 +900,19 @@ fn fn_def_statement(i: &str) -> IResult<&str, Statement> {
   let (i, args) =
     separated_list0(char(','), space_delimited(argument))(i)?;
   let (i, _) = space_delimited(tag(")"))(i)?;
+  let (i, _) = space_delimited(tag("->"))(i)?;
+  let (i, ret_type) = type_decl(i)?;
   let (i, stmts) =
     delimited(open_brace, statements, close_brace)(i)?;
-  Ok((i, Statement::FnDef { name, args, stmts }))
+  Ok((
+    i,
+    Statement::FnDef {
+      name,
+      args,
+      ret_type,
+      stmts,
+    },
+  ))
 }
 
 fn return_statement(i: &str) -> IResult<&str, Statement> {
