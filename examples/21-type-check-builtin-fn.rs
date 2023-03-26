@@ -562,12 +562,7 @@ fn standard_functions<'src>() -> Functions<'src> {
     FnDef::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
       ret_type: TypeDecl::Any,
-      code: Box::new(move |args| {
-        let val =
-          args.first().expect("function missing argument");
-        println!("print: {val}");
-        Value::I64(0)
-      }),
+        code: Box::new(print),
     }),
   );
   funcs.insert(
@@ -575,12 +570,7 @@ fn standard_functions<'src>() -> Functions<'src> {
     FnDef::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
       ret_type: TypeDecl::Any,
-      code: Box::new(move |args| {
-        let val =
-          args.first().expect("function missing argument");
-        println!("dbg: {val:?}");
-        Value::I64(0)
-      }),
+        code: Box::new(p_dbg),
     }),
   );
   funcs.insert(
@@ -620,6 +610,16 @@ fn standard_functions<'src>() -> Functions<'src> {
     }),
   );
   funcs
+}
+
+fn print(values: &[Value]) -> Value {
+  println!("print: {}", values[0]);
+  Value::I64(0)
+}
+
+fn p_dbg(values: &[Value]) -> Value {
+  println!("dbg: {:?}", values[0]);
+  Value::I64(0)
 }
 
 fn eval_stmts<'src>(
