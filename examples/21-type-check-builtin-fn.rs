@@ -213,14 +213,9 @@ pub struct TypeCheckContext<'src> {
 
 impl<'src> TypeCheckContext<'src> {
   pub fn new() -> Self {
-    let mut funcs = HashMap::new();
-    standard_functions(|name, f| {
-      funcs.insert(name, f);
-    });
-
     Self {
       vars: HashMap::new(),
-      funcs,
+      funcs: standard_functions(),
       super_context: None,
     }
   }
@@ -353,8 +348,7 @@ fn tc_expr<'src>(
         ))
       })?;
       let args_decl = func.args();
-      for (arg_ty, decl) in
-        args_ty.iter().zip(args_decl.iter())
+      for (arg_ty, decl) in args_ty.iter().zip(args_decl.iter())
       {
         tc_coerce_type(&arg_ty, &decl.1)?;
       }
@@ -522,14 +516,9 @@ struct StackFrame<'src> {
 
 impl<'src> StackFrame<'src> {
   fn new() -> Self {
-    let mut funcs = Functions::new();
-    standard_functions(|name, f| {
-      funcs.insert(name, f);
-    });
-
     Self {
       vars: Variables::new(),
-      funcs,
+      funcs: standard_functions(),
       uplevel: None,
     }
   }
@@ -554,22 +543,21 @@ impl<'src> StackFrame<'src> {
   }
 }
 
-fn standard_functions<'src>(
-  mut add: impl FnMut(String, FnDef<'src>),
-) {
-  add("sqrt".to_string(), unary_fn(f64::sqrt));
-  add("sin".to_string(), unary_fn(f64::sin));
-  add("cos".to_string(), unary_fn(f64::cos));
-  add("tan".to_string(), unary_fn(f64::tan));
-  add("asin".to_string(), unary_fn(f64::asin));
-  add("acos".to_string(), unary_fn(f64::acos));
-  add("atan".to_string(), unary_fn(f64::atan));
-  add("atan2".to_string(), binary_fn(f64::atan2));
-  add("pow".to_string(), binary_fn(f64::powf));
-  add("exp".to_string(), unary_fn(f64::exp));
-  add("log".to_string(), binary_fn(f64::log));
-  add("log10".to_string(), unary_fn(f64::log10));
-  add(
+fn standard_functions<'src>() -> Functions<'src> {
+  let mut funcs = Functions::new();
+  funcs.insert("sqrt".to_string(), unary_fn(f64::sqrt));
+  funcs.insert("sin".to_string(), unary_fn(f64::sin));
+  funcs.insert("cos".to_string(), unary_fn(f64::cos));
+  funcs.insert("tan".to_string(), unary_fn(f64::tan));
+  funcs.insert("asin".to_string(), unary_fn(f64::asin));
+  funcs.insert("acos".to_string(), unary_fn(f64::acos));
+  funcs.insert("atan".to_string(), unary_fn(f64::atan));
+  funcs.insert("atan2".to_string(), binary_fn(f64::atan2));
+  funcs.insert("pow".to_string(), binary_fn(f64::powf));
+  funcs.insert("exp".to_string(), unary_fn(f64::exp));
+  funcs.insert("log".to_string(), binary_fn(f64::log));
+  funcs.insert("log10".to_string(), unary_fn(f64::log10));
+  funcs.insert(
     "print".to_string(),
     FnDef::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
@@ -582,7 +570,7 @@ fn standard_functions<'src>(
       }),
     }),
   );
-  add(
+  funcs.insert(
     "dbg".to_string(),
     FnDef::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
@@ -595,7 +583,7 @@ fn standard_functions<'src>(
       }),
     }),
   );
-  add(
+  funcs.insert(
     "i64".to_string(),
     FnDef::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
@@ -607,7 +595,7 @@ fn standard_functions<'src>(
       }),
     }),
   );
-  add(
+  funcs.insert(
     "f64".to_string(),
     FnDef::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
@@ -619,7 +607,7 @@ fn standard_functions<'src>(
       }),
     }),
   );
-  add(
+  funcs.insert(
     "str".to_string(),
     FnDef::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
@@ -631,6 +619,7 @@ fn standard_functions<'src>(
       }),
     }),
   );
+  funcs
 }
 
 fn eval_stmts<'src>(

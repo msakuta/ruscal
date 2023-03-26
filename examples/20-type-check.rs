@@ -348,8 +348,7 @@ fn tc_expr<'src>(
         ))
       })?;
       let args_decl = func.args();
-      for (arg_ty, decl) in
-        args_ty.iter().zip(args_decl.iter())
+      for (arg_ty, decl) in args_ty.iter().zip(args_decl.iter())
       {
         tc_coerce_type(&arg_ty, &decl.1)?;
       }
