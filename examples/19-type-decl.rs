@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{collections::HashMap, io::Read, ops::ControlFlow};
 
 use nom::{
@@ -176,19 +178,18 @@ pub enum TypeDecl {
 fn tc_coerce_type<'src>(
   value: &TypeDecl,
   target: &TypeDecl,
-  ctx: &TypeCheckContext<'src>,
 ) -> Result<TypeDecl, TypeCheckError> {
   use TypeDecl::*;
   Ok(match (value, target) {
     (_, Any) => value.clone(),
     (Any, _) => target.clone(),
     (F64 | I64, F64) => F64,
-    (F64, F64 | I64) => F64,
+    (F64, I64) => F64,
     (I64, I64) => I64,
     (Str, Str) => Str,
     _ => {
       return Err(TypeCheckError::new(format!(
-        "Type check error! {:?} cannot be assigned to {:?}",
+        "{:?} cannot be assigned to {:?}",
         value, target
       )))
     }

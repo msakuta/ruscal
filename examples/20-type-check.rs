@@ -30,7 +30,8 @@ fn main() {
 
   let mut tc_ctx = TypeCheckContext::new();
 
-  if let Err(err) = type_check(&parsed_statements, &mut tc_ctx) {
+  if let Err(err) = type_check(&parsed_statements, &mut tc_ctx)
+  {
     println!("Type check error: {err}");
     return;
   }
@@ -184,19 +185,18 @@ pub enum TypeDecl {
 fn tc_coerce_type<'src>(
   value: &TypeDecl,
   target: &TypeDecl,
-  ctx: &TypeCheckContext<'src>,
 ) -> Result<TypeDecl, TypeCheckError> {
   use TypeDecl::*;
   Ok(match (value, target) {
     (_, Any) => value.clone(),
     (Any, _) => target.clone(),
     (F64 | I64, F64) => F64,
-    (F64, F64 | I64) => F64,
+    (F64, I64) => F64,
     (I64, I64) => I64,
     (Str, Str) => Str,
     _ => {
       return Err(TypeCheckError::new(format!(
-        "Type check error! {:?} cannot be assigned to {:?}",
+        "{:?} cannot be assigned to {:?}",
         value, target
       )))
     }
@@ -348,10 +348,10 @@ fn tc_expr<'src>(
         ))
       })?;
       let args_decl = func.args();
-      for ((arg_ty, arg), decl) in
-        args_ty.iter().zip(args.iter()).zip(args_decl.iter())
+      for (arg_ty, decl) in
+        args_ty.iter().zip(args_decl.iter())
       {
-        tc_coerce_type(&arg_ty, &decl.1, ctx)?;
+        tc_coerce_type(&arg_ty, &decl.1)?;
       }
       func.ret_type()
     }
@@ -362,21 +362,20 @@ fn tc_expr<'src>(
     Lt(lhs, rhs) => tc_binary_cmp(&lhs, &rhs, ctx, "LT")?,
     Gt(lhs, rhs) => tc_binary_cmp(&lhs, &rhs, ctx, "GT")?,
     If(cond, true_branch, false_branch) => {
-      tc_coerce_type(
-        &tc_expr(cond, ctx)?,
-        &TypeDecl::I64,
-        ctx,
-      )?;
+      tc_coerce_type(&tc_expr(cond, ctx)?, &TypeDecl::I64)?;
       let true_type = type_check(true_branch, ctx)?;
       if let Some(false_type) = false_branch {
         let false_type = type_check(false_type, ctx)?;
-        binary_op_type(&true_type, &false_type).map_err(|_| {
-          TypeCheckError::new(
-            format!("Conditional expression doesn't have the \
+        binary_op_type(&true_type, &false_type).map_err(
+          |_| {
+            TypeCheckError::new(format!(
+              "Conditional expression doesn't have the \
             compatible types in true and false branch: \
-            {:?} and {:?}", true_type, false_type),
-          )
-        })?
+            {:?} and {:?}",
+              true_type, false_type
+            ))
+          },
+        )?
       } else {
         true_type
       }
@@ -393,14 +392,14 @@ fn type_check<'src>(
     match stmt {
       Statement::VarDef(var, type_, init_expr) => {
         let init_type = tc_expr(init_expr, ctx)?;
-        let init_type = tc_coerce_type(&init_type, type_, ctx)?;
+        let init_type = tc_coerce_type(&init_type, type_)?;
         ctx.vars.insert(*var, init_type);
       }
       Statement::VarAssign(var, expr) => {
         let init_type = tc_expr(expr, ctx)?;
         let var =
           ctx.vars.get(*var).expect("Variable not found");
-        tc_coerce_type(&init_type, var, ctx)?;
+        tc_coerce_type(&init_type, var)?;
       }
       Statement::FnDef {
         name,
@@ -422,11 +421,7 @@ fn type_check<'src>(
           subctx.vars.insert(arg, *ty);
         }
         let last_stmt = type_check(stmts, &mut subctx)?;
-        if let Some(Statement::Expression(ret_expr)) =
-          stmts.last()
-        {
-          tc_coerce_type(&last_stmt, &ret_type, ctx)?;
-        }
+        tc_coerce_type(&last_stmt, &ret_type)?;
       }
       Statement::Expression(e) => {
         res = tc_expr(&e, ctx)?;
@@ -437,16 +432,8 @@ fn type_check<'src>(
         end,
         stmts,
       } => {
-        tc_coerce_type(
-          &tc_expr(start, ctx)?,
-          &TypeDecl::I64,
-          ctx,
-        )?;
-        tc_coerce_type(
-          &tc_expr(end, ctx)?,
-          &TypeDecl::I64,
-          ctx,
-        )?;
+        tc_coerce_type(&tc_expr(start, ctx)?, &TypeDecl::I64)?;
+        tc_coerce_type(&tc_expr(end, ctx)?, &TypeDecl::I64)?;
         ctx.vars.insert(loop_var, TypeDecl::I64);
         res = type_check(stmts, ctx)?;
       }
@@ -544,57 +531,57 @@ impl<'src> StackFrame<'src> {
     funcs.insert("log".to_string(), binary_fn(f64::log));
     funcs.insert("log10".to_string(), unary_fn(f64::log10));
     funcs.insert(
-    "print".to_string(),
-    FnDef::Native(NativeFn {
-      args: vec![("arg", TypeDecl::Any)],
-      ret_type: TypeDecl::Any,
+      "print".to_string(),
+      FnDef::Native(NativeFn {
+        args: vec![("arg", TypeDecl::Any)],
+        ret_type: TypeDecl::Any,
         code: Box::new(print),
-    }),
-  );
+      }),
+    );
     funcs.insert(
-    "dbg".to_string(),
-    FnDef::Native(NativeFn {
-      args: vec![("arg", TypeDecl::Any)],
-      ret_type: TypeDecl::Any,
+      "dbg".to_string(),
+      FnDef::Native(NativeFn {
+        args: vec![("arg", TypeDecl::Any)],
+        ret_type: TypeDecl::Any,
         code: Box::new(p_dbg),
-    }),
-  );
-    funcs.insert(
-    "i64".to_string(),
-    FnDef::Native(NativeFn {
-      args: vec![("arg", TypeDecl::Any)],
-      ret_type: TypeDecl::I64,
-      code: Box::new(move |args| {
-        Value::I64(coerce_i64(
-          args.first().expect("function missing argument"),
-        ))
       }),
-    }),
-  );
+    );
     funcs.insert(
-    "f64".to_string(),
-    FnDef::Native(NativeFn {
-      args: vec![("arg", TypeDecl::Any)],
-      ret_type: TypeDecl::F64,
-      code: Box::new(move |args| {
-        Value::F64(coerce_f64(
-          args.first().expect("function missing argument"),
-        ))
+      "i64".to_string(),
+      FnDef::Native(NativeFn {
+        args: vec![("arg", TypeDecl::Any)],
+        ret_type: TypeDecl::I64,
+        code: Box::new(move |args| {
+          Value::I64(coerce_i64(
+            args.first().expect("function missing argument"),
+          ))
+        }),
       }),
-    }),
-  );
+    );
     funcs.insert(
-    "str".to_string(),
-    FnDef::Native(NativeFn {
-      args: vec![("arg", TypeDecl::Any)],
-      ret_type: TypeDecl::Str,
-      code: Box::new(move |args| {
-        Value::Str(coerce_str(
-          args.first().expect("function missing argument"),
-        ))
+      "f64".to_string(),
+      FnDef::Native(NativeFn {
+        args: vec![("arg", TypeDecl::Any)],
+        ret_type: TypeDecl::F64,
+        code: Box::new(move |args| {
+          Value::F64(coerce_f64(
+            args.first().expect("function missing argument"),
+          ))
+        }),
       }),
-    }),
-  );
+    );
+    funcs.insert(
+      "str".to_string(),
+      FnDef::Native(NativeFn {
+        args: vec![("arg", TypeDecl::Any)],
+        ret_type: TypeDecl::Str,
+        code: Box::new(move |args| {
+          Value::Str(coerce_str(
+            args.first().expect("function missing argument"),
+          ))
+        }),
+      }),
+    );
 
     Self {
       vars: Variables::new(),
