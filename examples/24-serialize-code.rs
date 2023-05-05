@@ -48,35 +48,42 @@ impl Instruction {
   }
 }
 
+fn write_program(file: &str) {
+  let instructions = [
+    Instruction::new(OpCode::NumLiteral, 42),
+    Instruction::new(OpCode::NumLiteral, 36),
+    Instruction::new(OpCode::Add, 0),
+  ];
+
+  if let Ok(writer) = std::fs::File::create(file) {
+    let mut writer = BufWriter::new(writer);
+    for instruction in &instructions {
+      instruction.serialize(&mut writer).unwrap();
+    }
+    println!("Written {} instructions", instructions.len());
+  }
+}
+
+fn read_program(file: &str) -> Option<Vec<Instruction>> {
+  if let Ok(reader) = std::fs::File::open(file) {
+    let mut reader = BufReader::new(reader);
+    let mut instructions = vec![];
+    while let Ok(inst) = Instruction::deserialize(&mut reader) {
+      instructions.push(inst);
+    }
+    Some(instructions)
+  } else {
+    None
+  }
+}
+
 fn main() {
   let mut args = std::env::args();
-  args.next(); // (1)
+  args.next();
   match args.next().as_ref().map(|s| s as &str) {
-    Some("w") => {
-      let instructions = [
-        Instruction::new(OpCode::NumLiteral, 42),
-        Instruction::new(OpCode::NumLiteral, 36),
-        Instruction::new(OpCode::Add, 0),
-      ];
-
-      if let Ok(writer) = std::fs::File::create("bytecode.bin")
-      {
-        let mut writer = BufWriter::new(writer);
-        for instruction in &instructions {
-          instruction.serialize(&mut writer).unwrap();
-        }
-        println!("Written {} instructions", instructions.len());
-      }
-    }
+    Some("w") => write_program("bytecode.bin"),
     Some("r") => {
-      if let Ok(reader) = std::fs::File::open("bytecode.bin") {
-        let mut reader = BufReader::new(reader);
-        let mut instructions = vec![];
-        while let Ok(inst) =
-          Instruction::deserialize(&mut reader)
-        {
-          instructions.push(inst);
-        }
+      if let Some(instructions) = read_program("bytecode.bin") {
         let result = interpret(&instructions);
         println!("result: {result:?}");
       }
