@@ -35,25 +35,18 @@ impl Instruction {
     &self,
     writer: &mut impl Write,
   ) -> Result<(), std::io::Error> {
-    writer.write(&[self.op as u8])?;
-    writer.write(&self.arg0.to_le_bytes())?;
+    writer.write(&[self.op as u8, self.arg0])?;
     Ok(())
   }
 
   fn deserialize(
     reader: &mut impl Read,
   ) -> Result<Option<Self>, std::io::Error> {
-    let mut op = [0u8; 1];
-    if reader.read(&mut op)? == 0 {
+    let mut buf = [0u8; 2];
+    if reader.read(&mut buf)? != 2 {
       return Ok(None);
     }
-    let op = op[0].into();
-    let mut arg0 = [0u8; 1];
-    if reader.read(&mut arg0)? == 0 {
-      return Ok(None);
-    }
-    let arg0 = u8::from_le_bytes(arg0);
-    Ok(Some(Self::new(op, arg0)))
+    Ok(Some(Self::new(buf[0].into(), buf[1])))
   }
 }
 
