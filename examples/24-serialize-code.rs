@@ -35,7 +35,7 @@ impl Instruction {
     &self,
     writer: &mut impl Write,
   ) -> Result<(), std::io::Error> {
-    writer.write(&[self.op as u8, self.arg0])?;
+    writer.write_all(&[self.op as u8, self.arg0])?;
     Ok(())
   }
 
