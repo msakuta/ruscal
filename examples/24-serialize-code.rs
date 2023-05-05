@@ -41,12 +41,10 @@ impl Instruction {
 
   fn deserialize(
     reader: &mut impl Read,
-  ) -> Result<Option<Self>, std::io::Error> {
+  ) -> Result<Self, std::io::Error> {
     let mut buf = [0u8; 2];
-    if reader.read(&mut buf)? != 2 {
-      return Ok(None);
-    }
-    Ok(Some(Self::new(buf[0].into(), buf[1])))
+    reader.read_exact(&mut buf)?;
+    Ok(Self::new(buf[0].into(), buf[1]))
   }
 }
 
@@ -74,8 +72,8 @@ fn main() {
       if let Ok(reader) = std::fs::File::open("bytecode.bin") {
         let mut reader = BufReader::new(reader);
         let mut instructions = vec![];
-        while let Some(inst) =
-          Instruction::deserialize(&mut reader).unwrap()
+        while let Ok(inst) =
+          Instruction::deserialize(&mut reader)
         {
           instructions.push(inst);
         }
