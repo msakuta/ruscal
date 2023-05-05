@@ -176,7 +176,7 @@ impl std::ops::Div for Value {
   }
 }
 
-pub type Span<'a> = LocatedSpan<&'a str>;
+type Span<'a> = LocatedSpan<&'a str>;
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TypeDecl {
@@ -268,10 +268,11 @@ impl<'src> std::fmt::Display for TypeCheckError<'src> {
   ) -> std::fmt::Result {
     write!(
       f,
-      "{}\nlocation: {}:{}",
+      "{}\nlocation: {}:{}: {}",
       self.msg,
       self.span.location_line(),
-      self.span.get_utf8_column()
+      self.span.get_utf8_column(),
+      self.span.fragment()
     )
   }
 }
@@ -1050,10 +1051,17 @@ fn term(i: Span) -> IResult<Span, Expression> {
     |acc, (op, val): (char, Expression)| {
       let span = calc_offset(i, acc.span);
       match op {
-      '*' => Expression::new(ExprEnum::Mul(Box::new(acc), Box::new(val)), span),
-      '/' => Expression::new(ExprEnum::Div(Box::new(acc), Box::new(val)), span),
+        '*' => Expression::new(
+          ExprEnum::Mul(Box::new(acc), Box::new(val)),
+          span,
+        ),
+        '/' => Expression::new(
+          ExprEnum::Div(Box::new(acc), Box::new(val)),
+          span,
+        ),
         _ => panic!(
-            "Multiplicative expression should have '*' or '/' operator"
+          "Multiplicative expression should have '*' \
+            or '/' operator"
         ),
       }
     },
