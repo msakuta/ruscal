@@ -1,12 +1,12 @@
 enum Instruction {
-  NumLiteral(i64),
+  LoadLiteral(i64),
   Add,
 }
 
 fn main() {
   let instructions = [
-    Instruction::NumLiteral(42),
-    Instruction::NumLiteral(36),
+    Instruction::LoadLiteral(42),
+    Instruction::LoadLiteral(36),
     Instruction::Add,
   ];
 
@@ -20,7 +20,7 @@ fn interpret(instructions: &[Instruction]) -> Option<i64> {
 
   for instruction in instructions {
     match instruction {
-      Instruction::NumLiteral(value) => stack.push(*value),
+      Instruction::LoadLiteral(value) => stack.push(*value),
       Instruction::Add => {
         let rhs = stack.pop().expect("Stack underflow");
         let lhs = stack.pop().expect("Stack underflow");

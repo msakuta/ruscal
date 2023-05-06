@@ -3,18 +3,18 @@ use std::io::{BufReader, BufWriter, Read, Write};
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum OpCode {
-  NumLiteral,
+  LoadLiteral,
   Add,
 }
 
 impl From<u8> for OpCode {
   #[allow(non_upper_case_globals)]
   fn from(o: u8) -> Self {
-    const NumLiteral: u8 = OpCode::NumLiteral as u8;
+    const LoadLiteral: u8 = OpCode::LoadLiteral as u8;
     const Add: u8 = OpCode::Add as u8;
 
     match o {
-      NumLiteral => OpCode::NumLiteral,
+      LoadLiteral => OpCode::LoadLiteral,
       Add => OpCode::Add,
       _ => panic!("Opcode \"{:02X}\" unrecognized!", o),
     }
@@ -97,9 +97,9 @@ impl Compiler {
 fn write_program(file: &str) -> std::io::Result<()> {
   let mut compiler = Compiler::new();
   let arg = compiler.add_const(512);
-  compiler.add_inst(OpCode::NumLiteral, arg);
+  compiler.add_inst(OpCode::LoadLiteral, arg);
   let arg = compiler.add_const(1024);
-  compiler.add_inst(OpCode::NumLiteral, arg);
+  compiler.add_inst(OpCode::LoadLiteral, arg);
   compiler.add_inst(OpCode::Add, 0);
 
   let writer = std::fs::File::create(file)?;
@@ -160,7 +160,7 @@ impl ByteCode {
 
     for instruction in &self.instructions {
       match instruction.op {
-        OpCode::NumLiteral => {
+        OpCode::LoadLiteral => {
           stack.push(self.consts[instruction.arg0 as usize]);
         }
         OpCode::Add => {

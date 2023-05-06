@@ -3,18 +3,18 @@ use std::io::{BufReader, BufWriter, Read, Write};
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
 pub enum OpCode {
-  NumLiteral,
+  LoadLiteral,
   Add,
 }
 
 impl From<u8> for OpCode {
   #[allow(non_upper_case_globals)]
   fn from(o: u8) -> Self {
-    const NumLiteral: u8 = OpCode::NumLiteral as u8;
+    const LoadLiteral: u8 = OpCode::LoadLiteral as u8;
     const Add: u8 = OpCode::Add as u8;
 
     match o {
-      NumLiteral => OpCode::NumLiteral,
+      LoadLiteral => OpCode::LoadLiteral,
       Add => OpCode::Add,
       _ => panic!("Opcode \"{:02X}\" unrecognized!", o),
     }
@@ -50,8 +50,8 @@ impl Instruction {
 
 fn write_program(file: &str) {
   let instructions = [
-    Instruction::new(OpCode::NumLiteral, 42),
-    Instruction::new(OpCode::NumLiteral, 36),
+    Instruction::new(OpCode::LoadLiteral, 42),
+    Instruction::new(OpCode::LoadLiteral, 36),
     Instruction::new(OpCode::Add, 0),
   ];
 
@@ -97,7 +97,7 @@ fn interpret(instructions: &[Instruction]) -> Option<i64> {
 
   for instruction in instructions {
     match instruction.op {
-      OpCode::NumLiteral => {
+      OpCode::LoadLiteral => {
         stack.push(instruction.arg0 as i64);
       }
       OpCode::Add => {
