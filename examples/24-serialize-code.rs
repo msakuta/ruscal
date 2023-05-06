@@ -21,6 +21,8 @@ impl From<u8> for OpCode {
   }
 }
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
 struct Instruction {
   op: OpCode,
   arg0: u8,

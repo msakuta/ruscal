@@ -39,6 +39,8 @@ macro_rules! impl_op_from {
 
 impl_op_from!(LoadLiteral, Copy, Add);
 
+#[derive(Debug, Clone, Copy)]
+#[repr(C)]
 struct Instruction {
   op: OpCode,
   arg0: u8,
@@ -298,15 +300,6 @@ enum Expression<'src> {
   Ident(&'src str),
   NumLiteral(f64),
   Add(Box<Expression<'src>>, Box<Expression<'src>>),
-}
-
-fn eval(expr: Expression) -> f64 {
-  match expr {
-    Expression::Ident("pi") => std::f64::consts::PI,
-    Expression::Ident(id) => panic!("Unknown name {:?}", id),
-    Expression::NumLiteral(n) => n,
-    Expression::Add(lhs, rhs) => eval(*lhs) + eval(*rhs),
-  }
 }
 
 fn term(i: &str) -> IResult<&str, Expression> {
