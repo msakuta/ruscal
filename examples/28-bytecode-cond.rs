@@ -3,6 +3,8 @@ use std::{
   io::{BufReader, BufWriter, Read, Write},
 };
 
+use ::rusty_programmer::{dprintln, parse_args, RunMode};
+
 use nom::{
   branch::alt,
   bytes::complete::tag,
@@ -268,7 +270,8 @@ impl Compiler {
       }
       Expression::FnInvoke(name, args) => {
         let stack_before_call = self.target_stack.len();
-        let name = self.add_literal(Value::Str(name.to_string()));
+        let name =
+          self.add_literal(Value::Str(name.to_string()));
         let args = args
           .iter()
           .map(|arg| self.compile_expr(arg))
@@ -371,7 +374,8 @@ impl Compiler {
 
 fn write_program(
   source: &str,
-  file: &str,
+  out_file: &str,
+  disasm: bool,
 ) -> std::io::Result<()> {
   let mut compiler = Compiler::new();
   let (_, ex) = expr(source).map_err(|e| {
@@ -380,14 +384,16 @@ fn write_program(
 
   compiler.compile_expr(&ex);
 
-  compiler.disasm(&mut std::io::stdout())?;
+  if disasm {
+    compiler.disasm(&mut std::io::stdout())?;
+  }
 
-  let writer = std::fs::File::create(file)?;
+  let writer = std::fs::File::create(out_file)?;
   let mut writer = BufWriter::new(writer);
   compiler.write_literals(&mut writer).unwrap();
   compiler.write_insts(&mut writer).unwrap();
   println!(
-    "Written {} literals and {} instructions",
+    "Written {} literals and {} instructions to {out_file:?}",
     compiler.literals.len(),
     compiler.instructions.len()
   );
@@ -440,7 +446,7 @@ impl ByteCode {
 
     while ip < self.instructions.len() {
       let instruction = &self.instructions[ip];
-      println!(
+      dprintln!(
         "interpret[{ip}]: {instruction:?} stack: {stack:?}"
       );
       match instruction.op {
@@ -557,21 +563,22 @@ fn read_program(file: &str) -> std::io::Result<ByteCode> {
 }
 
 fn main() {
-  let mut args = std::env::args();
-  args.next(); // executable name
-  let arg = args.next();
-  let source =
-    args.next().unwrap_or_else(|| "pow(2, 8)".to_owned());
-  match arg.as_ref().map(|s| s as &str) {
-    Some("w") => {
-      write_program(&source, "bytecode.bin").unwrap()
+  let Some(args) = parse_args() else { return };
+
+  match args.run_mode {
+    RunMode::Compile => {
+      if let Some(expr) = args.source {
+        write_program(&expr, &args.output, args.disasm)
+          .unwrap();
+      }
     }
-    Some("r") => {
-      if let Ok(bytecode) = read_program("bytecode.bin") {
+    RunMode::Run(code_file) => match read_program(&code_file) {
+      Ok(bytecode) => {
         let result = bytecode.interpret();
         println!("result: {result:?}");
       }
-    }
+      Err(e) => eprintln!("Read program error: {e:?}"),
+    },
     _ => println!("Please specify w or r as an argument"),
   }
 }

@@ -1,7 +1,6 @@
 use std::{
   fmt::Display,
   io::{BufReader, BufWriter, Read, Write},
-  sync::atomic::{AtomicBool, Ordering},
 };
 
 use ::rusty_programmer::{dprintln, parse_args, RunMode};
@@ -516,7 +515,7 @@ impl Compiler {
 
 fn write_program(
   source: &str,
-  output_file: &str,
+  out_file: &str,
   disasm: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let mut compiler = Compiler::new();
@@ -535,12 +534,12 @@ fn write_program(
     compiler.disasm(&mut std::io::stdout())?;
   }
 
-  let writer = std::fs::File::create(output_file)?;
+  let writer = std::fs::File::create(out_file)?;
   let mut writer = BufWriter::new(writer);
   compiler.write_literals(&mut writer).unwrap();
   compiler.write_insts(&mut writer).unwrap();
   println!(
-    "Written {} literals and {} instructions",
+    "Written {} literals and {} instructions to {out_file:?}",
     compiler.literals.len(),
     compiler.instructions.len()
   );
@@ -755,15 +754,13 @@ fn main() {
         );
       }
     }
-    RunMode::Run(code_file) => {
-      match read_program(&code_file) {
-        Ok(bytecode) => {
-          let result = bytecode.interpret();
-          println!("result: {result:?}");
-        }
-        Err(e) => eprintln!("Read program error: {e:?}"),
+    RunMode::Run(code_file) => match read_program(&code_file) {
+      Ok(bytecode) => {
+        let result = bytecode.interpret();
+        println!("result: {result:?}");
       }
-    }
+      Err(e) => eprintln!("Read program error: {e:?}"),
+    },
     _ => println!("Please specify -c or -r as an argument"),
   }
 }
