@@ -69,7 +69,7 @@ impl Instruction {
 }
 
 struct Compiler {
-  consts: Vec<f64>,
+  literals: Vec<f64>,
   instructions: Vec<Instruction>,
   target_stack: Vec<usize>,
 }
@@ -77,15 +77,15 @@ struct Compiler {
 impl Compiler {
   fn new() -> Self {
     Self {
-      consts: vec![],
+      literals: vec![],
       instructions: vec![],
       target_stack: vec![],
     }
   }
 
-  fn add_const(&mut self, value: f64) -> u8 {
-    let ret = self.consts.len();
-    self.consts.push(value);
+  fn add_literal(&mut self, value: f64) -> u8 {
+    let ret = self.literals.len();
+    self.literals.push(value);
     ret as u8
   }
 
@@ -93,12 +93,12 @@ impl Compiler {
     self.instructions.push(Instruction { op, arg0 });
   }
 
-  fn write_const_table(
+  fn writer_literals(
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writer.write_all(&self.consts.len().to_le_bytes())?;
-    for value in &self.consts {
+    writer.write_all(&self.literals.len().to_le_bytes())?;
+    for value in &self.literals {
       writer.write_all(&value.to_le_bytes())?;
     }
     Ok(())
@@ -118,13 +118,13 @@ impl Compiler {
   fn compile_expr(&mut self, ex: &Expression) -> usize {
     match ex {
       Expression::NumLiteral(num) => {
-        let id = self.add_const(*num);
+        let id = self.add_literal(*num);
         self.add_inst(OpCode::LoadLiteral, id);
         self.target_stack.push(id as usize);
         self.target_stack.len() - 1
       }
       Expression::Ident("pi") => {
-        let id = self.add_const(std::f64::consts::PI as f64);
+        let id = self.add_literal(std::f64::consts::PI as f64);
         self.add_inst(OpCode::LoadLiteral, id);
         self.target_stack.push(id as usize);
         self.target_stack.len() - 1
@@ -156,8 +156,8 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writeln!(writer, "Const table [{}]", self.consts.len())?;
-    for (i, con) in self.consts.iter().enumerate() {
+    writeln!(writer, "Const table [{}]", self.literals.len())?;
+    for (i, con) in self.literals.iter().enumerate() {
       writeln!(writer, "  [{i}] {}", *con)?;
     }
 
@@ -194,25 +194,25 @@ fn write_program(file: &str) -> std::io::Result<()> {
 
   let writer = std::fs::File::create(file)?;
   let mut writer = BufWriter::new(writer);
-  compiler.write_const_table(&mut writer).unwrap();
+  compiler.writer_literals(&mut writer).unwrap();
   compiler.write_insts(&mut writer).unwrap();
   println!(
-    "Written {} consts and {} instructions",
-    compiler.consts.len(),
+    "Written {} literals and {} instructions",
+    compiler.literals.len(),
     compiler.instructions.len()
   );
   Ok(())
 }
 
 struct ByteCode {
-  consts: Vec<f64>,
+  literals: Vec<f64>,
   instructions: Vec<Instruction>,
 }
 
 impl ByteCode {
   fn new() -> Self {
     Self {
-      consts: vec![],
+      literals: vec![],
       instructions: vec![],
     }
   }
@@ -223,11 +223,11 @@ impl ByteCode {
   ) -> std::io::Result<()> {
     let mut buf = [0; std::mem::size_of::<usize>()];
     reader.read_exact(&mut buf)?;
-    let num_consts = usize::from_le_bytes(buf);
-    for _ in 0..num_consts {
+    let num_literals = usize::from_le_bytes(buf);
+    for _ in 0..num_literals {
       let mut buf = [0u8; std::mem::size_of::<i64>()];
       reader.read_exact(&mut buf)?;
-      self.consts.push(f64::from_le_bytes(buf));
+      self.literals.push(f64::from_le_bytes(buf));
     }
     Ok(())
   }
@@ -252,7 +252,7 @@ impl ByteCode {
     for instruction in &self.instructions {
       match instruction.op {
         OpCode::LoadLiteral => {
-          stack.push(self.consts[instruction.arg0 as usize]);
+          stack.push(self.literals[instruction.arg0 as usize]);
         }
         OpCode::Copy => {
           stack.push(
