@@ -1,0 +1,5 @@
+var split = 10;
+
+for i in 0 to split {
+    print(i / split);
+}
