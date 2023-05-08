@@ -194,8 +194,19 @@ impl Compiler {
     ret as u8
   }
 
-  fn add_inst(&mut self, op: OpCode, arg0: u8) {
+  fn add_inst(&mut self, op: OpCode, arg0: u8) -> usize {
+    let inst = self.instructions.len();
     self.instructions.push(Instruction { op, arg0 });
+    inst
+  }
+
+  fn add_copy_inst(&mut self, stack_idx: usize) -> usize {
+    let inst = self.add_inst(
+      OpCode::Copy,
+      (self.target_stack.len() - stack_idx - 1) as u8,
+    );
+    self.target_stack.push(0);
+    inst
   }
 
   fn write_literals(
@@ -284,15 +295,9 @@ impl Compiler {
   ) -> usize {
     let lhs = self.compile_expr(lhs);
     let rhs = self.compile_expr(rhs);
-    self.add_inst(
-      OpCode::Copy,
-      (self.target_stack.len() - lhs - 1) as u8,
-    );
+    self.add_copy_inst(lhs);
     self.target_stack.push(self.target_stack[lhs as usize]);
-    self.add_inst(
-      OpCode::Copy,
-      (self.target_stack.len() - rhs - 1) as u8,
-    );
+    self.add_copy_inst(rhs);
     self.target_stack.pop();
     self.add_inst(op, 0);
     self.target_stack.push(usize::MAX);

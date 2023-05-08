@@ -89,8 +89,19 @@ impl Compiler {
     ret as u8
   }
 
-  fn add_inst(&mut self, op: OpCode, arg0: u8) {
+  fn add_inst(&mut self, op: OpCode, arg0: u8) -> usize {
+    let inst = self.instructions.len();
     self.instructions.push(Instruction { op, arg0 });
+    inst
+  }
+
+  fn add_copy_inst(&mut self, stack_idx: usize) -> usize {
+    let inst = self.add_inst(
+      OpCode::Copy,
+      (self.target_stack.len() - stack_idx - 1) as u8,
+    );
+    self.target_stack.push(0);
+    inst
   }
 
   fn writer_literals(
@@ -135,15 +146,9 @@ impl Compiler {
       Expression::Add(lhs, rhs) => {
         let lhs = self.compile_expr(lhs);
         let rhs = self.compile_expr(rhs);
-        self.add_inst(
-          OpCode::Copy,
-          (self.target_stack.len() - lhs - 1) as u8,
-        );
+        self.add_copy_inst(lhs);
         self.target_stack.push(self.target_stack[lhs as usize]);
-        self.add_inst(
-          OpCode::Copy,
-          (self.target_stack.len() - rhs - 1) as u8,
-        );
+        self.add_copy_inst(rhs);
         self.target_stack.pop();
         self.add_inst(OpCode::Add, 0);
         self.target_stack.push(usize::MAX);
@@ -156,7 +161,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writeln!(writer, "Const table [{}]", self.literals.len())?;
+    writeln!(writer, "Literals [{}]", self.literals.len())?;
     for (i, con) in self.literals.iter().enumerate() {
       writeln!(writer, "  [{i}] {}", *con)?;
     }
@@ -217,7 +222,7 @@ impl ByteCode {
     }
   }
 
-  fn read_const_table(
+  fn read_literals(
     &mut self,
     reader: &mut impl Read,
   ) -> std::io::Result<()> {
@@ -275,7 +280,7 @@ fn read_program(file: &str) -> std::io::Result<ByteCode> {
   let reader = std::fs::File::open(file)?;
   let mut reader = BufReader::new(reader);
   let mut bytecode = ByteCode::new();
-  bytecode.read_const_table(&mut reader)?;
+  bytecode.read_literals(&mut reader)?;
   bytecode.read_instructions(&mut reader)?;
   Ok(bytecode)
 }
