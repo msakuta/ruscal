@@ -420,11 +420,12 @@ impl Compiler {
             Target::Local(vname.to_string());
         }
         Statement::VarAssign(vname, ex) => {
-          let ex = self.compile_expr(ex);
-          let local = self
+          let stk_ex = self.compile_expr(ex);
+          let (stk_local, _) = self
             .target_stack
             .iter_mut()
-            .find(|tgt| {
+            .enumerate()
+            .find(|(_, tgt)| {
               if let Target::Local(tgt) = tgt {
                 tgt == vname
               } else {
@@ -434,6 +435,12 @@ impl Compiler {
             .ok_or_else(|| {
               "Variable name not found".to_string()
             })?;
+          self.add_copy_inst(stk_ex);
+          self.add_inst(
+            OpCode::Store,
+            (self.target_stack.len() - stk_local - 1) as u8,
+          );
+          self.target_stack.pop();
         }
         Statement::For {
           loop_var,
