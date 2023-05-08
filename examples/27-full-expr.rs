@@ -273,11 +273,7 @@ impl Compiler {
         self.add_inst(OpCode::LoadLiteral, name);
         self.target_stack.push(0);
         for arg in &args {
-          self.add_inst(
-            OpCode::Copy,
-            (self.target_stack.len() - *arg - 1) as u8,
-          );
-          self.target_stack.push(0);
+          self.add_copy_inst(*arg);
         }
 
         self.add_inst(OpCode::Call, args.len() as u8);

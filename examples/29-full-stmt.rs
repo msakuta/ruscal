@@ -256,12 +256,6 @@ impl Compiler {
     inst
   }
 
-  fn add_target(&mut self, target: Target) -> usize {
-    let stack_ref = self.target_stack.len();
-    self.target_stack.push(target);
-    stack_ref
-  }
-
   fn write_literals(
     &self,
     writer: &mut impl Write,
@@ -388,19 +382,11 @@ impl Compiler {
   ) -> usize {
     let lhs = self.compile_expr(lhs);
     let rhs = self.compile_expr(rhs);
-    self.add_inst(
-      OpCode::Copy,
-      (self.target_stack.len() - lhs - 1) as u8,
-    );
-    self
-      .target_stack
-      .push(self.target_stack[lhs as usize].clone());
-    self.add_inst(
-      OpCode::Copy,
-      (self.target_stack.len() - rhs - 1) as u8,
-    );
-    self.target_stack.pop();
+    self.add_copy_inst(lhs);
+    self.add_copy_inst(rhs);
     self.add_inst(op, 0);
+    self.target_stack.pop();
+    self.target_stack.pop();
     self.target_stack.push(Target::Temp);
     self.target_stack.len() - 1
   }
