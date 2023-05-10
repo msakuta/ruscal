@@ -256,6 +256,33 @@ impl Compiler {
     inst
   }
 
+  fn add_lt_inst(&mut self, stack_idx: usize) -> usize {
+    self.add_inst(
+      OpCode::Lt,
+      (self.target_stack.len() - stack_idx - 1) as u8,
+    )
+  }
+
+  fn add_store_inst(&mut self, stack_idx: usize) -> usize {
+    let inst = self.add_inst(
+      OpCode::Store,
+      (self.target_stack.len() - stack_idx - 1) as u8,
+    );
+    self.target_stack.pop();
+    inst
+  }
+
+  fn add_pop_inst(&mut self, count: usize) -> usize {
+    let inst = self.add_inst(
+      OpCode::Pop,
+      (self.target_stack.len() - count - 1) as u8,
+    );
+    self
+      .target_stack
+      .resize(self.target_stack.len() - count, Target::Temp);
+    inst
+  }
+
   fn write_literals(
     &self,
     writer: &mut impl Write,
@@ -422,11 +449,7 @@ impl Compiler {
               "Variable name not found".to_string()
             })?;
           self.add_copy_inst(stk_ex);
-          self.add_inst(
-            OpCode::Store,
-            (self.target_stack.len() - stk_local - 1) as u8,
-          );
-          self.target_stack.pop();
+          self.add_store_inst(stk_local);
         }
         Statement::For {
           loop_var,
@@ -444,10 +467,7 @@ impl Compiler {
           dprintln!("after start: {:?}", self.target_stack);
           let stk_check_exit = self.target_stack.len();
           self.add_copy_inst(stk_loop_var);
-          self.add_inst(
-            OpCode::Lt,
-            (self.target_stack.len() - end - 1) as u8,
-          );
+          self.add_lt_inst(end);
           let jf_inst = self.add_inst(OpCode::Jf, 0);
           self.target_stack.pop();
           dprintln!("start in loop: {:?}", self.target_stack);
@@ -459,14 +479,8 @@ impl Compiler {
           self.target_stack.push(Target::Literal(one as usize));
           self.add_inst(OpCode::Add, 0);
           self.target_stack.pop();
-          self.add_inst(
-            OpCode::Store,
-            (self.target_stack.len() - stk_loop_var - 1) as u8,
-          );
-          self.add_inst(
-            OpCode::Pop,
-            (self.target_stack.len() - stk_loop_var - 2) as u8,
-          );
+          self.add_store_inst(stk_loop_var);
+          self.add_pop_inst(stk_loop_var);
           self.add_inst(OpCode::Jmp, stk_check_exit as u8);
           self.instructions[jf_inst].arg0 =
             self.instructions.len() as u8;
