@@ -336,6 +336,39 @@ impl FnDef {
       instructions,
     })
   }
+
+  fn disasm(
+    &self,
+    writer: &mut impl Write,
+  ) -> std::io::Result<()> {
+    use OpCode::*;
+    writeln!(writer, "  Literals [{}]", self.literals.len())?;
+    for (i, con) in self.literals.iter().enumerate() {
+      writeln!(writer, "    [{i}] {}", *con)?;
+    }
+
+    writeln!(
+      writer,
+      "  Instructions [{}]",
+      self.instructions.len()
+    )?;
+    for (i, inst) in self.instructions.iter().enumerate() {
+      match inst.op {
+        LoadLiteral => writeln!(
+          writer,
+          "    [{i}] {:?} {} ({:?})",
+          inst.op, inst.arg0, self.literals[inst.arg0 as usize]
+        )?,
+        Copy | Call | Jmp | Jf | Lt | Pop | Store => writeln!(
+          writer,
+          "    [{i}] {:?} {}",
+          inst.op, inst.arg0
+        )?,
+        _ => writeln!(writer, "    [{i}] {:?}", inst.op)?,
+      }
+    }
+    Ok(())
+  }
 }
 
 struct Compiler {
@@ -624,8 +657,6 @@ impl Compiler {
             .map(|arg| Target::Local(arg.to_string()))
             .collect();
           self.compile_stmts(stmts)?;
-          println!("FnDef({name:?})");
-          self.disasm(&mut std::io::stdout())?;
           self.add_fn(name.to_string(), args);
           self.literals = literals;
           self.instructions = instructions;
@@ -642,8 +673,6 @@ impl Compiler {
   ) -> Result<(), Box<dyn std::error::Error>> {
     let name = "main";
     self.compile_stmts(stmts)?;
-    println!("FnDef({name:?})");
-    self.disasm(&mut std::io::stdout())?;
     self.add_fn(name.to_string(), &[]);
     Ok(())
   }
@@ -652,31 +681,9 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    use OpCode::*;
-    writeln!(writer, "Literals [{}]", self.literals.len())?;
-    for (i, con) in self.literals.iter().enumerate() {
-      writeln!(writer, "  [{i}] {}", *con)?;
-    }
-
-    writeln!(
-      writer,
-      "Instructions [{}]",
-      self.instructions.len()
-    )?;
-    for (i, inst) in self.instructions.iter().enumerate() {
-      match inst.op {
-        LoadLiteral => writeln!(
-          writer,
-          "  [{i}] {:?} {} ({:?})",
-          inst.op, inst.arg0, self.literals[inst.arg0 as usize]
-        )?,
-        Copy | Call | Jmp | Jf | Lt | Pop | Store => writeln!(
-          writer,
-          "  [{i}] {:?} {}",
-          inst.op, inst.arg0
-        )?,
-        _ => writeln!(writer, "  [{i}] {:?}", inst.op)?,
-      }
+    for (name, fn_def) in &self.funcs {
+      writeln!(writer, "Function {name:?}:")?;
+      fn_def.disasm(writer)?;
     }
     Ok(())
   }
@@ -705,7 +712,7 @@ fn write_program(
   }
 
   compiler.write_funcs(writer)?;
-  println!(
+  dprintln!(
     "Written {} literals and {} instructions to {out_file:?}",
     compiler.literals.len(),
     compiler.instructions.len()
@@ -752,8 +759,10 @@ impl ByteCode {
     &self,
     fn_name: &str,
     args: &[Value],
-  ) -> Option<Value> {
-    let fn_def = self.funcs.get(fn_name)?;
+  ) -> Result<Value, Box<dyn std::error::Error>> {
+    let fn_def = self.funcs.get(fn_name).ok_or_else(|| {
+      format!("Function {fn_name:?} was not found")
+    })?;
     let mut stack = args.to_vec();
     let mut ip = 0;
 
@@ -810,12 +819,8 @@ impl ByteCode {
             "log" => binary_fn(f64::log)(args),
             "log10" => unary_fn(f64::log10)(args),
             "print" => print_fn(args),
-            _ => match self.interpret(fname, args) {
-              Some(res) => res,
-              None => panic!("Unknown function name {fname:?}"),
-            },
+            _ => self.interpret(fname, args)?,
           };
-          println!("Fn returned {res:?}");
           stack.resize(
             stack.len() - instruction.arg0 as usize - 1,
             Value::F64(0.),
@@ -847,13 +852,21 @@ impl ByteCode {
           );
         }
         OpCode::Ret => {
-          return stack.pop();
+          return Ok(
+            stack
+              .pop()
+              .ok_or_else(|| "Stack underflow".to_string())?,
+          );
         }
       }
       ip += 1;
     }
 
-    stack.pop()
+    Ok(
+      stack
+        .pop()
+        .ok_or_else(|| "Stack underflow".to_string())?,
+    )
   }
 
   fn interpret_bin_op(
@@ -931,7 +944,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let reader = std::fs::File::open(&code_file)?;
       let mut reader = BufReader::new(reader);
       let bytecode = read_program(&mut reader)?;
-      bytecode.interpret("main", &[]);
+      if let Err(e) = bytecode.interpret("main", &[]) {
+        eprintln!("Runtime error: {e:?}");
+      }
     }
     RunMode::CompileAndRun => {
       let mut buf = vec![];
@@ -942,7 +957,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       )?;
       let bytecode =
         read_program(&mut std::io::Cursor::new(&mut buf))?;
-      bytecode.interpret("main", &[]);
+      if let Err(e) = bytecode.interpret("main", &[]) {
+        eprintln!("Runtime error: {e:?}");
+      }
     }
     _ => println!("Please specify -c, -r or -R as an argument"),
   }
