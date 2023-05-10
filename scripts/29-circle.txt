@@ -1,5 +1,7 @@
 var split = 10;
+var pi = 3.14159265358979;
 
 for i in 0 to split {
-    print(i / split);
+    var angle = i / split * pi * 2;
+    print(cos(angle), sin(angle));
 }

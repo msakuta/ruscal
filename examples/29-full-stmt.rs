@@ -272,15 +272,20 @@ impl Compiler {
     inst
   }
 
-  fn add_pop_inst(&mut self, count: usize) -> usize {
+  /// Pop until given stack index
+  fn add_pop_until_inst(
+    &mut self,
+    stack_idx: usize,
+  ) -> Option<usize> {
+    if self.target_stack.len() <= stack_idx {
+      return None;
+    }
     let inst = self.add_inst(
       OpCode::Pop,
-      (self.target_stack.len() - count - 1) as u8,
+      (self.target_stack.len() - stack_idx - 1) as u8,
     );
-    self
-      .target_stack
-      .resize(self.target_stack.len() - count, Target::Temp);
-    inst
+    self.target_stack.resize(stack_idx + 1, Target::Temp);
+    Some(inst)
   }
 
   fn write_literals(
@@ -363,12 +368,8 @@ impl Compiler {
         self
           .target_stack
           .resize(stack_before_call + 1, Target::Temp);
-        let pop = stack_before_call - stack_before_args;
-        if 0 < pop {
-          self.add_inst(OpCode::Pop, pop as u8);
-          self
-            .target_stack
-            .resize(stack_before_args + 1, Target::Temp);
+        if stack_before_args < stack_before_call {
+          self.add_pop_until_inst(stack_before_args);
         }
         self.target_stack.len() - 1
       }
@@ -480,7 +481,7 @@ impl Compiler {
           self.add_inst(OpCode::Add, 0);
           self.target_stack.pop();
           self.add_store_inst(stk_loop_var);
-          self.add_pop_inst(stk_loop_var);
+          self.add_pop_until_inst(stk_loop_var);
           self.add_inst(OpCode::Jmp, stk_check_exit as u8);
           self.instructions[jf_inst].arg0 =
             self.instructions.len() as u8;
