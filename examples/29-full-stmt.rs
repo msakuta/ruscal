@@ -4,6 +4,7 @@ use std::{
 };
 
 use ::rusty_programmer::{dprintln, parse_args, RunMode};
+use rusty_programmer::Args;
 
 use nom::{
   branch::alt,
@@ -523,6 +524,7 @@ impl Compiler {
 
 fn write_program(
   source: &str,
+  writer: &mut impl Write,
   out_file: &str,
   disasm: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -542,16 +544,22 @@ fn write_program(
     compiler.disasm(&mut std::io::stdout())?;
   }
 
-  let writer = std::fs::File::create(out_file)?;
-  let mut writer = BufWriter::new(writer);
-  compiler.write_literals(&mut writer).unwrap();
-  compiler.write_insts(&mut writer).unwrap();
+  compiler.write_literals(writer).unwrap();
+  compiler.write_insts(writer).unwrap();
   println!(
     "Written {} literals and {} instructions to {out_file:?}",
     compiler.literals.len(),
     compiler.instructions.len()
   );
   Ok(())
+}
+
+fn print_fn(args: &[Value]) -> Value {
+  for arg in args {
+    print!("{:?} ", arg);
+  }
+  println!("");
+  Value::F64(0.)
 }
 
 struct ByteCode {
@@ -728,49 +736,62 @@ fn binary_fn(
   }
 }
 
-fn print_fn(args: &[Value]) -> Value {
-  for arg in args {
-    print!("{:?} ", arg);
-  }
-  println!("");
-  Value::F64(0.)
+fn compile(
+  writer: &mut impl Write,
+  args: &Args,
+  out_file: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+  let src = args.source.as_ref().ok_or_else(|| {
+    Box::new(std::io::Error::new(
+      std::io::ErrorKind::Other,
+      "Please specify source file to compile after -c"
+        .to_string(),
+    ))
+  })?;
+  let source = std::fs::read_to_string(src)?;
+  write_program(&source, writer, out_file, args.disasm)
 }
 
-fn read_program(file: &str) -> std::io::Result<ByteCode> {
-  let reader = std::fs::File::open(file)?;
-  let mut reader = BufReader::new(reader);
+fn read_program(
+  reader: &mut impl Read,
+) -> std::io::Result<ByteCode> {
   let mut bytecode = ByteCode::new();
-  bytecode.read_literals(&mut reader)?;
-  bytecode.read_instructions(&mut reader)?;
+  bytecode.read_literals(reader)?;
+  bytecode.read_instructions(reader)?;
   Ok(bytecode)
 }
 
-fn main() {
-  let Some(args) = parse_args() else { return };
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let Some(args) = parse_args() else { return Ok(()) };
 
   match args.run_mode {
     RunMode::Compile => {
-      if let Some(source) = args
-        .source
-        .and_then(|src| std::fs::read_to_string(src).ok())
-      {
-        write_program(&source, &args.output, args.disasm)
-          .unwrap()
-      } else {
-        println!(
-          "Please specify source file to compile after -c"
-        );
-      }
+      let writer = std::fs::File::create(&args.output)?;
+      let mut writer = BufWriter::new(writer);
+      compile(&mut writer, &args, &args.output)?;
     }
-    RunMode::Run(code_file) => match read_program(&code_file) {
-      Ok(bytecode) => {
-        let result = bytecode.interpret();
-        println!("result: {result:?}");
-      }
-      Err(e) => eprintln!("Read program error: {e:?}"),
-    },
-    _ => println!("Please specify -c or -r as an argument"),
+    RunMode::Run(code_file) => {
+      let reader = std::fs::File::open(&code_file)?;
+      let mut reader = BufReader::new(reader);
+      let bytecode = read_program(&mut reader)?;
+      let result = bytecode.interpret();
+      println!("result: {result:?}");
+    }
+    RunMode::CompileAndRun => {
+      let mut buf = vec![];
+      compile(
+        &mut std::io::Cursor::new(&mut buf),
+        &args,
+        "<Memory>",
+      )?;
+      let bytecode =
+        read_program(&mut std::io::Cursor::new(&mut buf))?;
+      let result = bytecode.interpret();
+      println!("result: {result:?}");
+    }
+    _ => println!("Please specify -c, -r or -R as an argument"),
   }
+  Ok(())
 }
 
 #[derive(Debug, PartialEq, Clone)]

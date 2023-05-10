@@ -372,6 +372,7 @@ impl Compiler {
 
 fn write_program(
   source: &str,
+  writer: &mut impl Write,
   out_file: &str,
   disasm: bool,
 ) -> std::io::Result<()> {
@@ -386,10 +387,8 @@ fn write_program(
     compiler.disasm(&mut std::io::stdout())?;
   }
 
-  let writer = std::fs::File::create(out_file)?;
-  let mut writer = BufWriter::new(writer);
-  compiler.write_literals(&mut writer).unwrap();
-  compiler.write_insts(&mut writer).unwrap();
+  compiler.write_literals(writer).unwrap();
+  compiler.write_insts(writer).unwrap();
   println!(
     "Written {} literals and {} instructions to {out_file:?}",
     compiler.literals.len(),
@@ -551,34 +550,60 @@ fn binary_fn(
   }
 }
 
-fn read_program(file: &str) -> std::io::Result<ByteCode> {
-  let reader = std::fs::File::open(file)?;
-  let mut reader = BufReader::new(reader);
+fn read_program(
+  reader: &mut impl Read,
+) -> std::io::Result<ByteCode> {
   let mut bytecode = ByteCode::new();
-  bytecode.read_literals(&mut reader)?;
-  bytecode.read_instructions(&mut reader)?;
+  bytecode.read_literals(reader)?;
+  bytecode.read_instructions(reader)?;
   Ok(bytecode)
 }
 
-fn main() {
-  let Some(args) = parse_args() else { return };
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let Some(args) = parse_args() else { return Ok(()) };
 
   match args.run_mode {
     RunMode::Compile => {
       if let Some(expr) = args.source {
-        write_program(&expr, &args.output, args.disasm)
-          .unwrap();
+        let writer = std::fs::File::create(&args.output)?;
+        let mut writer = BufWriter::new(writer);
+        write_program(
+          &expr,
+          &mut writer,
+          &args.output,
+          args.disasm,
+        )?;
       }
     }
-    RunMode::Run(code_file) => match read_program(&code_file) {
-      Ok(bytecode) => {
+    RunMode::Run(code_file) => {
+      let reader = std::fs::File::open(&code_file)?;
+      let mut reader = BufReader::new(reader);
+      match read_program(&mut reader) {
+        Ok(bytecode) => {
+          let result = bytecode.interpret();
+          println!("result: {result:?}");
+        }
+        Err(e) => eprintln!("Read program error: {e:?}"),
+      }
+    }
+    RunMode::CompileAndRun => {
+      if let Some(expr) = args.source {
+        let mut buf = vec![];
+        write_program(
+          &expr,
+          &mut std::io::Cursor::new(&mut buf),
+          "<Memory>",
+          args.disasm,
+        )?;
+        let bytecode =
+          read_program(&mut std::io::Cursor::new(&mut buf))?;
         let result = bytecode.interpret();
         println!("result: {result:?}");
       }
-      Err(e) => eprintln!("Read program error: {e:?}"),
-    },
-    _ => println!("Please specify w or r as an argument"),
+    }
+    _ => println!("Please specify -c or -r as an argument"),
   }
+  Ok(())
 }
 
 #[derive(Debug, PartialEq, Clone)]

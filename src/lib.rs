@@ -4,6 +4,7 @@ pub enum RunMode {
   None,
   Compile,
   Run(String),
+  CompileAndRun,
 }
 
 pub struct Args {
@@ -37,6 +38,7 @@ pub fn parse_args() -> Option<Args> {
           .unwrap_or_else(|| "bytecode.bin".to_string());
         run_mode = RunMode::Run(bytecode);
       }
+      "-R" => run_mode = RunMode::CompileAndRun,
       "-d" => disasm = true,
       "-D" => {
         DEBUG.store(true, std::sync::atomic::Ordering::Relaxed)
@@ -62,6 +64,7 @@ Options:
     -c       Compile source file to a bytecode
     -o file  Specify output file
     -r       Run bytecode
+    -R       Compile and run
     -d       Disassemble compiled code
     -h       Display help"#,
       exe.unwrap_or_else(|| "29-full-stmt".to_string())
