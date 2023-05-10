@@ -774,8 +774,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let reader = std::fs::File::open(&code_file)?;
       let mut reader = BufReader::new(reader);
       let bytecode = read_program(&mut reader)?;
-      let result = bytecode.interpret();
-      println!("result: {result:?}");
+      bytecode.interpret();
     }
     RunMode::CompileAndRun => {
       let mut buf = vec![];
@@ -786,8 +785,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       )?;
       let bytecode =
         read_program(&mut std::io::Cursor::new(&mut buf))?;
-      let result = bytecode.interpret();
-      println!("result: {result:?}");
+      bytecode.interpret();
     }
     _ => println!("Please specify -c, -r or -R as an argument"),
   }
