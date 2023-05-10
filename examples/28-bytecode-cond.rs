@@ -358,7 +358,12 @@ impl Compiler {
     )?;
     for (i, inst) in self.instructions.iter().enumerate() {
       match inst.op {
-        LoadLiteral | Copy | Call | Jmp | Jf => writeln!(
+        LoadLiteral => writeln!(
+          writer,
+          "  [{i}] {:?} {} ({:?})",
+          inst.op, inst.arg0, self.literals[inst.arg0 as usize]
+        )?,
+        Copy | Call | Jmp | Jf => writeln!(
           writer,
           "  [{i}] {:?} {}",
           inst.op, inst.arg0

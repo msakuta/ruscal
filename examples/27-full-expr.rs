@@ -304,6 +304,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
+    use OpCode::*;
     writeln!(writer, "Literals [{}]", self.literals.len())?;
     for (i, con) in self.literals.iter().enumerate() {
       writeln!(writer, "  [{i}] {}", *con)?;
@@ -314,18 +315,19 @@ impl Compiler {
       "Instructions [{}]",
       self.instructions.len()
     )?;
-    for inst in &self.instructions {
+    for (i, inst) in self.instructions.iter().enumerate() {
       match inst.op {
-        OpCode::LoadLiteral => {
-          writeln!(writer, "  LoadLiteral {}", inst.arg0)?
-        }
-        OpCode::Copy => {
-          writeln!(writer, "  Copy {}", inst.arg0)?
-        }
-        OpCode::Call => {
-          writeln!(writer, "  Call {}", inst.arg0)?
-        }
-        _ => writeln!(writer, "  {:?}", inst.op)?,
+        LoadLiteral => writeln!(
+          writer,
+          "  [{i}] {:?} {} ({:?})",
+          inst.op, inst.arg0, self.literals[inst.arg0 as usize]
+        )?,
+        Copy | Call => writeln!(
+          writer,
+          "  [{i}] {:?} {}",
+          inst.op, inst.arg0
+        )?,
+        _ => writeln!(writer, "  [{i}] {:?}", inst.op)?,
       }
     }
     Ok(())
