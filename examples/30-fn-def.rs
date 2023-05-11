@@ -419,11 +419,9 @@ impl Compiler {
     inst
   }
 
-  fn add_lt_inst(&mut self, stack_idx: usize) -> usize {
-    self.add_inst(
-      OpCode::Lt,
-      (self.target_stack.len() - stack_idx - 1) as u8,
-    )
+  fn add_binop_inst(&mut self, op: OpCode) -> usize {
+    self.target_stack.pop();
+    self.add_inst(op, 0)
   }
 
   fn add_store_inst(&mut self, stack_idx: usize) -> usize {
@@ -431,6 +429,12 @@ impl Compiler {
       OpCode::Store,
       (self.target_stack.len() - stack_idx - 1) as u8,
     );
+    self.target_stack.pop();
+    inst
+  }
+
+  fn add_jf_inst(&mut self, inst_jmp: usize) -> usize {
+    let inst = self.add_inst(OpCode::Jf, inst_jmp as u8);
     self.target_stack.pop();
     inst
   }
@@ -512,6 +516,12 @@ impl Compiler {
       Expression::Div(lhs, rhs) => {
         self.bin_op(OpCode::Div, lhs, rhs)
       }
+      Expression::Gt(lhs, rhs) => {
+        self.bin_op(OpCode::Lt, rhs, lhs)
+      }
+      Expression::Lt(lhs, rhs) => {
+        self.bin_op(OpCode::Lt, lhs, rhs)
+      }
       Expression::FnInvoke(name, args) => {
         let name =
           self.add_literal(Value::Str(name.to_string()));
@@ -540,7 +550,7 @@ impl Compiler {
           Copy,
           (self.target_stack.len() - cond - 1) as u8,
         );
-        let jf_inst = self.add_inst(Jf, 0);
+        let jf_inst = self.add_jf_inst(0);
         let _true_branch = self.compile_expr(true_branch);
         if let Some(false_branch) = false_branch.as_ref() {
           let jmp_inst = self.add_inst(Jmp, 0);
@@ -618,19 +628,20 @@ impl Compiler {
           end,
           stmts,
         } => {
-          let start = self.compile_expr(start);
-          let end = self.compile_expr(end);
-          dprintln!("start: {start} end: {end}");
-          self.add_copy_inst(start);
+          let stk_start = self.compile_expr(start);
+          let stk_end = self.compile_expr(end);
+          dprintln!("start: {stk_start} end: {stk_end}");
+          self.add_copy_inst(stk_start);
           let stk_loop_var = self.target_stack.len() - 1;
           self.target_stack[stk_loop_var] =
             Target::Local(loop_var.to_string());
           dprintln!("after start: {:?}", self.target_stack);
           let stk_check_exit = self.target_stack.len();
           self.add_copy_inst(stk_loop_var);
-          self.add_lt_inst(end);
-          let jf_inst = self.add_inst(OpCode::Jf, 0);
-          self.target_stack.pop();
+          self.add_copy_inst(stk_end);
+          dprintln!("before cmp: {:?}", self.target_stack);
+          self.add_binop_inst(OpCode::Lt);
+          let jf_inst = self.add_jf_inst(0);
           dprintln!("start in loop: {:?}", self.target_stack);
           self.compile_stmts(stmts)?;
           let one = self.add_literal(Value::F64(1.));
@@ -838,13 +849,10 @@ impl ByteCode {
             continue;
           }
         }
-        OpCode::Lt => {
-          let lhs = stack.pop().expect("Lt needs an argument");
-          let rhs =
-            &stack[stack.len() - instruction.arg0 as usize];
-          let res = lhs.coerce_f64() < rhs.coerce_f64();
-          stack.push(Value::F64(res as i32 as f64));
-        }
+        OpCode::Lt => self
+          .interpret_bin_op(&mut stack, |lhs, rhs| {
+            (lhs < rhs) as i32 as f64
+          }),
         OpCode::Pop => {
           stack.resize(
             stack.len() - instruction.arg0 as usize,
@@ -975,6 +983,8 @@ enum Expression<'src> {
   Sub(Box<Expression<'src>>, Box<Expression<'src>>),
   Mul(Box<Expression<'src>>, Box<Expression<'src>>),
   Div(Box<Expression<'src>>, Box<Expression<'src>>),
+  Gt(Box<Expression<'src>>, Box<Expression<'src>>),
+  Lt(Box<Expression<'src>>, Box<Expression<'src>>),
   If(
     Box<Expression<'src>>,
     Box<Expression<'src>>,
@@ -1094,6 +1104,21 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
   )(i)
 }
 
+fn cond_expr(i: &str) -> IResult<&str, Expression> {
+  let (i, first) = num_expr(i)?;
+  let (i, cond) =
+    space_delimited(alt((char('<'), char('>'))))(i)?;
+  let (i, second) = num_expr(i)?;
+  Ok((
+    i,
+    match cond {
+      '<' => Expression::Lt(Box::new(first), Box::new(second)),
+      '>' => Expression::Gt(Box::new(first), Box::new(second)),
+      _ => unreachable!(),
+    },
+  ))
+}
+
 fn open_brace(i: &str) -> IResult<&str, ()> {
   let (i, _) = space_delimited(char('{'))(i)?;
   Ok((i, ()))
@@ -1125,7 +1150,7 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
 }
 
 fn expr(i: &str) -> IResult<&str, Expression> {
-  alt((if_expr, num_expr))(i)
+  alt((if_expr, cond_expr, num_expr))(i)
 }
 
 fn var_def(i: &str) -> IResult<&str, Statement> {
