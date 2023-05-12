@@ -100,6 +100,39 @@ impl Instruction {
   }
 }
 
+fn serialize_size(
+  sz: usize,
+  writer: &mut impl Write,
+) -> std::io::Result<()> {
+  writer.write_all(&(sz as u32).to_le_bytes())
+}
+
+fn deserialize_size(
+  reader: &mut impl Read,
+) -> std::io::Result<usize> {
+  let mut buf = [0u8; std::mem::size_of::<u32>()];
+  reader.read_exact(&mut buf)?;
+  Ok(u32::from_le_bytes(buf) as usize)
+}
+
+fn serialize_str(
+  s: &str,
+  writer: &mut impl Write,
+) -> std::io::Result<()> {
+  serialize_size(s.len(), writer)?;
+  writer.write_all(s.as_bytes())?;
+  Ok(())
+}
+
+fn deserialize_str(
+  reader: &mut impl Read,
+) -> std::io::Result<String> {
+  let mut buf = vec![0u8; deserialize_size(reader)?];
+  reader.read_exact(&mut buf)?;
+  let s = String::from_utf8(buf).unwrap();
+  Ok(s)
+}
+
 #[repr(u8)]
 enum ValueKind {
   F64,
@@ -149,8 +182,7 @@ impl Value {
         writer.write_all(&value.to_le_bytes())?;
       }
       Self::Str(value) => {
-        writer.write_all(&value.len().to_le_bytes())?;
-        writer.write_all(value.as_bytes())?;
+        serialize_str(value, writer)?;
       }
     }
     Ok(())
@@ -171,17 +203,7 @@ impl Value {
         reader.read_exact(&mut buf)?;
         Ok(Value::F64(f64::from_le_bytes(buf)))
       }
-      Str => {
-        let mut len_buf = [0u8; std::mem::size_of::<usize>()];
-        reader.read_exact(&mut len_buf)?;
-        let len = usize::from_le_bytes(len_buf);
-        let mut str_buf = vec![0u8; len];
-        reader.read_exact(&mut str_buf)?;
-        let str = String::from_utf8(str_buf).map_err(|e| {
-          std::io::Error::new(std::io::ErrorKind::Other, e)
-        })?;
-        Ok(Value::Str(str))
-      }
+      Str => Ok(Value::Str(deserialize_str(reader)?)),
       _ => Err(std::io::Error::new(
         std::io::ErrorKind::Other,
         format!(
@@ -293,7 +315,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writer.write_all(&self.literals.len().to_le_bytes())?;
+    serialize_size(self.literals.len(), writer)?;
     for value in &self.literals {
       value.serialize(writer)?;
     }
@@ -304,7 +326,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writer.write_all(&self.instructions.len().to_le_bytes())?;
+    serialize_size(self.instructions.len(), writer)?;
     for instruction in &self.instructions {
       instruction.serialize(writer).unwrap();
     }
@@ -459,17 +481,17 @@ impl Compiler {
           end,
           stmts,
         } => {
-          let start = self.compile_expr(start);
-          let end = self.compile_expr(end);
-          dprintln!("start: {start} end: {end}");
-          self.add_copy_inst(start);
+          let stk_start = self.compile_expr(start);
+          let stk_end = self.compile_expr(end);
+          dprintln!("start: {stk_start} end: {stk_end}");
+          self.add_copy_inst(stk_start);
           let stk_loop_var = self.target_stack.len() - 1;
           self.target_stack[stk_loop_var] =
             Target::Local(loop_var.to_string());
           dprintln!("after start: {:?}", self.target_stack);
           let stk_check_exit = self.target_stack.len();
           self.add_copy_inst(stk_loop_var);
-          self.add_lt_inst(end);
+          self.add_lt_inst(stk_end);
           let jf_inst = self.add_inst(OpCode::Jf, 0);
           self.target_stack.pop();
           dprintln!("start in loop: {:?}", self.target_stack);
@@ -583,9 +605,7 @@ impl ByteCode {
     &mut self,
     reader: &mut impl Read,
   ) -> std::io::Result<()> {
-    let mut buf = [0; std::mem::size_of::<usize>()];
-    reader.read_exact(&mut buf)?;
-    let num_literals = usize::from_le_bytes(buf);
+    let num_literals = deserialize_size(reader)?;
     for _ in 0..num_literals {
       self.literals.push(Value::deserialize(reader)?);
     }
@@ -596,9 +616,7 @@ impl ByteCode {
     &mut self,
     reader: &mut impl Read,
   ) -> std::io::Result<()> {
-    let mut buf = [0; std::mem::size_of::<usize>()];
-    reader.read_exact(&mut buf)?;
-    let num_instructions = usize::from_le_bytes(buf);
+    let num_instructions = deserialize_size(reader)?;
     for _ in 0..num_instructions {
       let inst = Instruction::deserialize(reader)?;
       self.instructions.push(inst);
