@@ -16,6 +16,7 @@ use nom::{
   sequence::{delimited, pair},
   IResult, Parser,
 };
+use rusty_programmer::{dprintln, parse_args, RunMode};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]
@@ -76,6 +77,39 @@ impl Instruction {
   }
 }
 
+fn serialize_size(
+  sz: usize,
+  writer: &mut impl Write,
+) -> std::io::Result<()> {
+  writer.write_all(&(sz as u32).to_le_bytes())
+}
+
+fn deserialize_size(
+  reader: &mut impl Read,
+) -> std::io::Result<usize> {
+  let mut buf = [0u8; std::mem::size_of::<u32>()];
+  reader.read_exact(&mut buf)?;
+  Ok(u32::from_le_bytes(buf) as usize)
+}
+
+fn serialize_str(
+  s: &str,
+  writer: &mut impl Write,
+) -> std::io::Result<()> {
+  serialize_size(s.len(), writer)?;
+  writer.write_all(s.as_bytes())?;
+  Ok(())
+}
+
+fn deserialize_str(
+  reader: &mut impl Read,
+) -> std::io::Result<String> {
+  let mut buf = vec![0u8; deserialize_size(reader)?];
+  reader.read_exact(&mut buf)?;
+  let s = String::from_utf8(buf).unwrap();
+  Ok(s)
+}
+
 #[repr(u8)]
 enum ValueKind {
   F64,
@@ -118,10 +152,7 @@ impl Value {
       Self::F64(value) => {
         writer.write_all(&value.to_le_bytes())?;
       }
-      Self::Str(value) => {
-        writer.write_all(&value.len().to_le_bytes())?;
-        writer.write_all(value.as_bytes())?;
-      }
+      Self::Str(value) => serialize_str(value, writer)?,
     }
     Ok(())
   }
@@ -141,17 +172,7 @@ impl Value {
         reader.read_exact(&mut buf)?;
         Ok(Value::F64(f64::from_le_bytes(buf)))
       }
-      Str => {
-        let mut len_buf = [0u8; std::mem::size_of::<usize>()];
-        reader.read_exact(&mut len_buf)?;
-        let len = usize::from_le_bytes(len_buf);
-        let mut str_buf = vec![0u8; len];
-        reader.read_exact(&mut str_buf)?;
-        let str = String::from_utf8(str_buf).map_err(|e| {
-          std::io::Error::new(std::io::ErrorKind::Other, e)
-        })?;
-        Ok(Value::Str(str))
-      }
+      Str => Ok(Value::Str(deserialize_str(reader)?)),
       _ => Err(std::io::Error::new(
         std::io::ErrorKind::Other,
         format!(
@@ -194,6 +215,7 @@ impl Compiler {
     ret as u8
   }
 
+  /// Returns absolute position of inserted value
   fn add_inst(&mut self, op: OpCode, arg0: u8) -> usize {
     let inst = self.instructions.len();
     self.instructions.push(Instruction { op, arg0 });
@@ -213,7 +235,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writer.write_all(&self.literals.len().to_le_bytes())?;
+    serialize_size(self.literals.len(), writer)?;
     for value in &self.literals {
       value.serialize(writer)?;
     }
@@ -224,7 +246,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writer.write_all(&self.instructions.len().to_le_bytes())?;
+    serialize_size(self.instructions.len(), writer)?;
     for instruction in &self.instructions {
       instruction.serialize(writer).unwrap();
     }
@@ -336,7 +358,9 @@ impl Compiler {
 
 fn write_program(
   source: &str,
-  file: &str,
+  writer: &mut impl Write,
+  out_file: &str,
+  disasm: bool,
 ) -> std::io::Result<()> {
   let mut compiler = Compiler::new();
   let (_, ex) = expr(source).map_err(|e| {
@@ -345,14 +369,14 @@ fn write_program(
 
   compiler.compile_expr(&ex);
 
-  compiler.disasm(&mut std::io::stdout())?;
+  if disasm {
+    compiler.disasm(&mut std::io::stdout())?;
+  }
 
-  let writer = std::fs::File::create(file)?;
-  let mut writer = BufWriter::new(writer);
-  compiler.write_literals(&mut writer).unwrap();
-  compiler.write_insts(&mut writer).unwrap();
+  compiler.write_literals(writer).unwrap();
+  compiler.write_insts(writer).unwrap();
   println!(
-    "Written {} literals and {} instructions",
+    "Written {} literals and {} instructions to {out_file:?}",
     compiler.literals.len(),
     compiler.instructions.len()
   );
@@ -376,9 +400,7 @@ impl ByteCode {
     &mut self,
     reader: &mut impl Read,
   ) -> std::io::Result<()> {
-    let mut buf = [0; std::mem::size_of::<usize>()];
-    reader.read_exact(&mut buf)?;
-    let num_literals = usize::from_le_bytes(buf);
+    let num_literals = deserialize_size(reader)?;
     for _ in 0..num_literals {
       self.literals.push(Value::deserialize(reader)?);
     }
@@ -389,9 +411,7 @@ impl ByteCode {
     &mut self,
     reader: &mut impl Read,
   ) -> std::io::Result<()> {
-    let mut buf = [0; std::mem::size_of::<usize>()];
-    reader.read_exact(&mut buf)?;
-    let num_instructions = usize::from_le_bytes(buf);
+    let num_instructions = deserialize_size(reader)?;
     for _ in 0..num_instructions {
       let inst = Instruction::deserialize(reader)?;
       self.instructions.push(inst);
@@ -402,7 +422,12 @@ impl ByteCode {
   fn interpret(&self) -> Option<Value> {
     let mut stack = vec![];
 
-    for instruction in &self.instructions {
+    for (ip, instruction) in
+      self.instructions.iter().enumerate()
+    {
+      dprintln!(
+        "interpret[{ip}]: {instruction:?} stack: {stack:?}"
+      );
       match instruction.op {
         OpCode::LoadLiteral => {
           stack.push(
@@ -496,33 +521,60 @@ fn binary_fn(
   }
 }
 
-fn read_program(file: &str) -> std::io::Result<ByteCode> {
-  let reader = std::fs::File::open(file)?;
-  let mut reader = BufReader::new(reader);
+fn read_program(
+  reader: &mut impl Read,
+) -> std::io::Result<ByteCode> {
   let mut bytecode = ByteCode::new();
-  bytecode.read_literals(&mut reader)?;
-  bytecode.read_instructions(&mut reader)?;
+  bytecode.read_literals(reader)?;
+  bytecode.read_instructions(reader)?;
   Ok(bytecode)
 }
 
-fn main() {
-  let mut args = std::env::args();
-  args.next(); // executable name
-  let arg = args.next();
-  let source =
-    args.next().unwrap_or_else(|| "pow(2, 8)".to_owned());
-  match arg.as_ref().map(|s| s as &str) {
-    Some("w") => {
-      write_program(&source, "bytecode.bin").unwrap()
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let Some(args) = parse_args() else { return Ok(()) };
+
+  match args.run_mode {
+    RunMode::Compile => {
+      if let Some(expr) = args.source {
+        let writer = std::fs::File::create(&args.output)?;
+        let mut writer = BufWriter::new(writer);
+        write_program(
+          &expr,
+          &mut writer,
+          &args.output,
+          args.disasm,
+        )?;
+      }
     }
-    Some("r") => {
-      if let Ok(bytecode) = read_program("bytecode.bin") {
+    RunMode::Run(code_file) => {
+      let reader = std::fs::File::open(&code_file)?;
+      let mut reader = BufReader::new(reader);
+      match read_program(&mut reader) {
+        Ok(bytecode) => {
+          let result = bytecode.interpret();
+          println!("result: {result:?}");
+        }
+        Err(e) => eprintln!("Read program error: {e:?}"),
+      }
+    }
+    RunMode::CompileAndRun => {
+      if let Some(expr) = args.source {
+        let mut buf = vec![];
+        write_program(
+          &expr,
+          &mut std::io::Cursor::new(&mut buf),
+          "<Memory>",
+          args.disasm,
+        )?;
+        let bytecode =
+          read_program(&mut std::io::Cursor::new(&mut buf))?;
         let result = bytecode.interpret();
         println!("result: {result:?}");
       }
     }
-    _ => println!("Please specify w or r as an argument"),
+    _ => println!("Please specify -c or -r as an argument"),
   }
+  Ok(())
 }
 
 #[derive(Debug, PartialEq, Clone)]
