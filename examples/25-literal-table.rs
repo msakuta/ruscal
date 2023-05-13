@@ -50,6 +50,21 @@ impl Instruction {
   }
 }
 
+fn serialize_size(
+  sz: usize,
+  writer: &mut impl Write,
+) -> std::io::Result<()> {
+  writer.write_all(&(sz as u32).to_le_bytes())
+}
+
+fn deserialize_size(
+  reader: &mut impl Read,
+) -> std::io::Result<usize> {
+  let mut buf = [0u8; std::mem::size_of::<u32>()];
+  reader.read_exact(&mut buf)?;
+  Ok(u32::from_le_bytes(buf) as usize)
+}
+
 struct Compiler {
   literals: Vec<i64>,
   instructions: Vec<Instruction>,
@@ -77,7 +92,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writer.write_all(&self.literals.len().to_le_bytes())?;
+    serialize_size(self.literals.len(), writer)?;
     for value in &self.literals {
       writer.write_all(&value.to_le_bytes())?;
     }
@@ -88,7 +103,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writer.write_all(&self.instructions.len().to_le_bytes())?;
+    serialize_size(self.instructions.len(), writer)?;
     for instruction in &self.instructions {
       instruction.serialize(writer).unwrap();
     }
@@ -132,9 +147,7 @@ impl ByteCode {
     &mut self,
     reader: &mut impl Read,
   ) -> std::io::Result<()> {
-    let mut buf = [0; std::mem::size_of::<usize>()];
-    reader.read_exact(&mut buf)?;
-    let num_literals = usize::from_le_bytes(buf);
+    let num_literals = deserialize_size(reader)?;
     for _ in 0..num_literals {
       let mut buf = [0u8; std::mem::size_of::<i64>()];
       reader.read_exact(&mut buf)?;
@@ -147,9 +160,7 @@ impl ByteCode {
     &mut self,
     reader: &mut impl Read,
   ) -> std::io::Result<()> {
-    let mut buf = [0; std::mem::size_of::<usize>()];
-    reader.read_exact(&mut buf)?;
-    let num_instructions = usize::from_le_bytes(buf);
+    let num_instructions = deserialize_size(reader)?;
     for _ in 0..num_instructions {
       let inst = Instruction::deserialize(reader)?;
       self.instructions.push(inst);
