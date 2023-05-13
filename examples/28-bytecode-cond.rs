@@ -260,7 +260,7 @@ impl Compiler {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    writer.write_all(&self.instructions.len().to_le_bytes())?;
+    serialize_size(self.instructions.len(), writer)?;
     for instruction in &self.instructions {
       instruction.serialize(writer).unwrap();
     }
