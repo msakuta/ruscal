@@ -279,11 +279,9 @@ impl Compiler {
     inst
   }
 
-  fn add_lt_inst(&mut self, stack_idx: usize) -> usize {
-    self.add_inst(
-      OpCode::Lt,
-      (self.target_stack.len() - stack_idx - 1) as u8,
-    )
+  fn add_binop_inst(&mut self, op: OpCode) -> usize {
+    self.target_stack.pop();
+    self.add_inst(op, 0)
   }
 
   fn add_store_inst(&mut self, stack_idx: usize) -> usize {
@@ -291,6 +289,12 @@ impl Compiler {
       OpCode::Store,
       (self.target_stack.len() - stack_idx - 1) as u8,
     );
+    self.target_stack.pop();
+    inst
+  }
+
+  fn add_jf_inst(&mut self, inst_jmp: usize) -> usize {
+    let inst = self.add_inst(OpCode::Jf, inst_jmp as u8);
     self.target_stack.pop();
     inst
   }
@@ -491,9 +495,10 @@ impl Compiler {
           dprintln!("after start: {:?}", self.target_stack);
           let stk_check_exit = self.target_stack.len();
           self.add_copy_inst(stk_loop_var);
-          self.add_lt_inst(stk_end);
-          let jf_inst = self.add_inst(OpCode::Jf, 0);
-          self.target_stack.pop();
+          self.add_copy_inst(stk_end);
+          dprintln!("before cmp: {:?}", self.target_stack);
+          self.add_binop_inst(OpCode::Lt);
+          let jf_inst = self.add_jf_inst(0);
           dprintln!("start in loop: {:?}", self.target_stack);
           self.compile_stmts(stmts)?;
           let one = self.add_literal(Value::F64(1.));
@@ -536,7 +541,7 @@ impl Compiler {
           "  [{i}] {:?} {} ({:?})",
           inst.op, inst.arg0, self.literals[inst.arg0 as usize]
         )?,
-        Copy | Call | Jmp | Jf | Lt | Pop | Store => writeln!(
+        Copy | Call | Jmp | Jf | Pop | Store => writeln!(
           writer,
           "  [{i}] {:?} {}",
           inst.op, inst.arg0
@@ -700,13 +705,10 @@ impl ByteCode {
             continue;
           }
         }
-        OpCode::Lt => {
-          let lhs = stack.pop().expect("Lt needs an argument");
-          let rhs =
-            &stack[stack.len() - instruction.arg0 as usize];
-          let res = lhs.coerce_f64() < rhs.coerce_f64();
-          stack.push(Value::F64(res as i32 as f64));
-        }
+        OpCode::Lt => self
+          .interpret_bin_op(&mut stack, |lhs, rhs| {
+            (lhs < rhs) as i32 as f64
+          }),
         OpCode::Pop => {
           stack.resize(
             stack.len() - instruction.arg0 as usize,
