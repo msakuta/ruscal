@@ -532,7 +532,7 @@ impl Compiler {
           self.target_stack[stk_loop_var] =
             Target::Local(loop_var.to_string());
           dprintln!("after start: {:?}", self.target_stack);
-          let stk_check_exit = self.target_stack.len();
+          let inst_check_exit = self.instructions.len();
           self.add_copy_inst(stk_loop_var);
           self.add_copy_inst(stk_end);
           dprintln!("before cmp: {:?}", self.target_stack);
@@ -549,7 +549,7 @@ impl Compiler {
           self.target_stack.pop();
           self.add_store_inst(stk_loop_var);
           self.add_pop_until_inst(stk_loop_var);
-          self.add_inst(OpCode::Jmp, stk_check_exit as u8);
+          self.add_inst(OpCode::Jmp, inst_check_exit as u8);
           self.instructions[jf_inst].arg0 =
             self.instructions.len() as u8;
           self.fixup_breaks();
