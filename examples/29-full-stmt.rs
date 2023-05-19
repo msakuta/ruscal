@@ -1,4 +1,5 @@
 use std::{
+  error::Error,
   fmt::Display,
   io::{BufReader, BufWriter, Read, Write},
 };
@@ -12,7 +13,7 @@ use nom::{
   character::complete::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
   },
-  combinator::{opt, recognize},
+  combinator::{map_res, opt, recognize},
   error::ParseError,
   multi::{fold_many0, many0},
   number::complete::recognize_float,
@@ -237,6 +238,7 @@ struct Compiler {
   literals: Vec<Value>,
   instructions: Vec<Instruction>,
   target_stack: Vec<Target>,
+  break_ips: Vec<usize>,
 }
 
 impl Compiler {
@@ -245,7 +247,16 @@ impl Compiler {
       literals: vec![],
       instructions: vec![],
       target_stack: vec![],
+      break_ips: vec![],
     }
+  }
+
+  fn fixup_breaks(&mut self) {
+    let break_jmp_addr = self.instructions.len();
+    for ip in &self.break_ips {
+      self.instructions[*ip].arg0 = break_jmp_addr as u8;
+    }
+    self.break_ips.clear();
   }
 
   fn add_literal(&mut self, value: Value) -> u8 {
@@ -337,8 +348,11 @@ impl Compiler {
     Ok(())
   }
 
-  fn compile_expr(&mut self, ex: &Expression) -> usize {
-    match ex {
+  fn compile_expr(
+    &mut self,
+    ex: &Expression,
+  ) -> Result<usize, Box<dyn Error>> {
+    Ok(match ex {
       Expression::NumLiteral(num) => {
         let id = self.add_literal(Value::F64(*num));
         self.add_inst(OpCode::LoadLiteral, id);
@@ -356,7 +370,7 @@ impl Compiler {
           },
         );
         if let Some(var) = var {
-          return var.0;
+          return Ok(var.0);
         } else {
           panic!(
             "Compile error! Variable not found: {ident:?}"
@@ -364,16 +378,22 @@ impl Compiler {
         }
       }
       Expression::Add(lhs, rhs) => {
-        self.bin_op(OpCode::Add, lhs, rhs)
+        self.bin_op(OpCode::Add, lhs, rhs)?
       }
       Expression::Sub(lhs, rhs) => {
-        self.bin_op(OpCode::Sub, lhs, rhs)
+        self.bin_op(OpCode::Sub, lhs, rhs)?
       }
       Expression::Mul(lhs, rhs) => {
-        self.bin_op(OpCode::Mul, lhs, rhs)
+        self.bin_op(OpCode::Mul, lhs, rhs)?
       }
       Expression::Div(lhs, rhs) => {
-        self.bin_op(OpCode::Div, lhs, rhs)
+        self.bin_op(OpCode::Div, lhs, rhs)?
+      }
+      Expression::Gt(lhs, rhs) => {
+        self.bin_op(OpCode::Lt, rhs, lhs)?
+      }
+      Expression::Lt(lhs, rhs) => {
+        self.bin_op(OpCode::Lt, lhs, rhs)?
       }
       Expression::FnInvoke(name, args) => {
         let stack_before_args = self.target_stack.len();
@@ -382,7 +402,7 @@ impl Compiler {
         let args = args
           .iter()
           .map(|arg| self.compile_expr(arg))
-          .collect::<Vec<_>>();
+          .collect::<Result<Vec<_>, _>>()?;
 
         let stack_before_call = self.target_stack.len();
         self.add_inst(OpCode::LoadLiteral, name);
@@ -402,22 +422,40 @@ impl Compiler {
       }
       Expression::If(cond, true_branch, false_branch) => {
         use OpCode::*;
-        let cond = self.compile_expr(cond);
-        self.add_inst(
-          Copy,
-          (self.target_stack.len() - cond - 1) as u8,
-        );
-        let jf_inst = self.add_inst(Jf, 0);
-        let _true_branch = self.compile_expr(true_branch);
+        let cond = self.compile_expr(cond)?;
+        self.add_copy_inst(cond);
+        let jf_inst = self.add_jf_inst(0);
+        let stack_size_before = self.target_stack.len();
+        let t_res = self
+          .compile_stmts(true_branch)?
+          .unwrap_or_else(|| {
+            let id = self.add_literal(Value::F64(0.));
+            self.add_inst(LoadLiteral, id as u8);
+            self.target_stack.len() - 1
+          });
+        dbg!(t_res);
+        if stack_size_before + 1 < t_res {
+          self.add_store_inst(stack_size_before + 1);
+          self.add_pop_until_inst(stack_size_before + 1);
+        }
         if let Some(false_branch) = false_branch.as_ref() {
           let jmp_inst = self.add_inst(Jmp, 0);
           self.instructions[jf_inst].arg0 =
             self.instructions.len() as u8;
-          let fb = self.compile_expr(&false_branch);
-          self.add_inst(
-            Copy,
-            (self.target_stack.len() - fb - 1) as u8,
-          );
+          self
+            .target_stack
+            .resize(stack_size_before, Target::Temp);
+          let f_res = self
+            .compile_stmts(&false_branch)?
+            .unwrap_or_else(|| {
+              let id = self.add_literal(Value::F64(0.));
+              self.add_inst(LoadLiteral, id as u8);
+              self.target_stack.len() - 1
+            });
+          if stack_size_before + 1 < f_res {
+            self.add_store_inst(stack_size_before + 1);
+            self.add_pop_until_inst(stack_size_before + 1);
+          }
           self.instructions[jmp_inst].arg0 =
             self.instructions.len() as u8;
         } else {
@@ -426,7 +464,7 @@ impl Compiler {
         }
         self.target_stack.len() - 1
       }
-    }
+    })
   }
 
   fn bin_op(
@@ -434,34 +472,35 @@ impl Compiler {
     op: OpCode,
     lhs: &Expression,
     rhs: &Expression,
-  ) -> usize {
-    let lhs = self.compile_expr(lhs);
-    let rhs = self.compile_expr(rhs);
+  ) -> Result<usize, Box<dyn Error>> {
+    let lhs = self.compile_expr(lhs)?;
+    let rhs = self.compile_expr(rhs)?;
     self.add_copy_inst(lhs);
     self.add_copy_inst(rhs);
     self.add_inst(op, 0);
     self.target_stack.pop();
     self.target_stack.pop();
     self.target_stack.push(Target::Temp);
-    self.target_stack.len() - 1
+    Ok(self.target_stack.len() - 1)
   }
 
   fn compile_stmts(
     &mut self,
     stmts: &Statements,
-  ) -> Result<(), String> {
+  ) -> Result<Option<usize>, Box<dyn Error>> {
+    let mut last_result = None;
     for stmt in stmts {
       match stmt {
         Statement::Expression(ex) => {
-          self.compile_expr(ex);
+          last_result = Some(self.compile_expr(ex)?);
         }
         Statement::VarDef(vname, ex) => {
-          let ex = self.compile_expr(ex);
+          let ex = self.compile_expr(ex)?;
           self.target_stack[ex] =
             Target::Local(vname.to_string());
         }
         Statement::VarAssign(vname, ex) => {
-          let stk_ex = self.compile_expr(ex);
+          let stk_ex = self.compile_expr(ex)?;
           let (stk_local, _) = self
             .target_stack
             .iter_mut()
@@ -485,8 +524,8 @@ impl Compiler {
           end,
           stmts,
         } => {
-          let stk_start = self.compile_expr(start);
-          let stk_end = self.compile_expr(end);
+          let stk_start = self.compile_expr(start)?;
+          let stk_end = self.compile_expr(end)?;
           dprintln!("start: {stk_start} end: {stk_end}");
           self.add_copy_inst(stk_start);
           let stk_loop_var = self.target_stack.len() - 1;
@@ -513,10 +552,16 @@ impl Compiler {
           self.add_inst(OpCode::Jmp, stk_check_exit as u8);
           self.instructions[jf_inst].arg0 =
             self.instructions.len() as u8;
+          self.fixup_breaks();
+        }
+        Statement::Break => {
+          let break_ip = self.instructions.len();
+          self.add_inst(OpCode::Jmp, 0);
+          self.break_ips.push(break_ip);
         }
       }
     }
-    Ok(())
+    Ok(last_result)
   }
 
   fn disasm(
@@ -825,10 +870,12 @@ enum Expression<'src> {
   Sub(Box<Expression<'src>>, Box<Expression<'src>>),
   Mul(Box<Expression<'src>>, Box<Expression<'src>>),
   Div(Box<Expression<'src>>, Box<Expression<'src>>),
+  Gt(Box<Expression<'src>>, Box<Expression<'src>>),
+  Lt(Box<Expression<'src>>, Box<Expression<'src>>),
   If(
     Box<Expression<'src>>,
-    Box<Expression<'src>>,
-    Option<Box<Expression<'src>>>,
+    Box<Statements<'src>>,
+    Option<Box<Statements<'src>>>,
   ),
 }
 
@@ -843,6 +890,7 @@ enum Statement<'src> {
     end: Expression<'src>,
     stmts: Statements<'src>,
   },
+  Break,
 }
 
 type Statements<'a> = Vec<Statement<'a>>;
@@ -939,6 +987,21 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
   )(i)
 }
 
+fn cond_expr(i: &str) -> IResult<&str, Expression> {
+  let (i, first) = num_expr(i)?;
+  let (i, cond) =
+    space_delimited(alt((char('<'), char('>'))))(i)?;
+  let (i, second) = num_expr(i)?;
+  Ok((
+    i,
+    match cond {
+      '<' => Expression::Lt(Box::new(first), Box::new(second)),
+      '>' => Expression::Gt(Box::new(first), Box::new(second)),
+      _ => unreachable!(),
+    },
+  ))
+}
+
 fn open_brace(i: &str) -> IResult<&str, ()> {
   let (i, _) = space_delimited(char('{'))(i)?;
   Ok((i, ()))
@@ -953,10 +1016,22 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
   let (i, _) = space_delimited(tag("if"))(i)?;
   let (i, cond) = expr(i)?;
   let (i, t_case) =
-    delimited(open_brace, expr, close_brace)(i)?;
+    delimited(open_brace, statements, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
     space_delimited(tag("else")),
-    delimited(open_brace, expr, close_brace),
+    alt((
+      delimited(
+        space_delimited(char('{')),
+        statements,
+        space_delimited(char('}')),
+      ),
+      map_res(
+        if_expr,
+        |v| -> Result<Vec<Statement>, nom::error::Error<&str>> {
+          Ok(vec![Statement::Expression(v)])
+        },
+      ),
+    )),
   ))(i)?;
 
   Ok((
@@ -970,7 +1045,7 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
 }
 
 fn expr(i: &str) -> IResult<&str, Expression> {
-  alt((if_expr, num_expr))(i)
+  alt((if_expr, cond_expr, num_expr))(i)
 }
 
 fn var_def(i: &str) -> IResult<&str, Statement> {
@@ -1014,20 +1089,53 @@ fn for_statement(i: &str) -> IResult<&str, Statement> {
   ))
 }
 
-fn statement(i: &str) -> IResult<&str, Statement> {
-  alt((
-    for_statement,
-    terminated(
-      alt((var_def, var_assign, expr_statement)),
-      char(';'),
-    ),
-  ))(i)
+fn break_stmt(input: &str) -> IResult<&str, Statement> {
+  let (r, _) = space_delimited(tag("break"))(input)?;
+  Ok((r, Statement::Break))
+}
+
+fn general_statement<'a>(
+  last: bool,
+) -> impl Fn(&'a str) -> IResult<&'a str, Statement> {
+  let terminator = move |i| -> IResult<&str, ()> {
+    let mut semicolon = pair(tag(";"), multispace0);
+    if last {
+      Ok((opt(semicolon)(i)?.0, ()))
+    } else {
+      Ok((semicolon(i)?.0, ()))
+    }
+  };
+  move |input: &str| {
+    alt((
+      terminated(var_def, terminator),
+      terminated(var_assign, terminator),
+      for_statement,
+      terminated(break_stmt, terminator),
+      terminated(expr_statement, terminator),
+    ))(input)
+  }
+}
+
+pub(crate) fn last_statement(
+  input: &str,
+) -> IResult<&str, Statement> {
+  general_statement(true)(input)
+}
+
+pub(crate) fn statement(
+  input: &str,
+) -> IResult<&str, Statement> {
+  general_statement(false)(input)
 }
 
 fn statements(i: &str) -> IResult<&str, Statements> {
-  let (i, stmts) = many0(statement)(i)?;
-  let (i, _) = opt(char(';'))(i)?;
-  Ok((i, stmts))
+  let (r, mut v) = many0(statement)(i)?;
+  let (r, last) = opt(last_statement)(r)?;
+  let (r, _) = opt(multispace0)(r)?;
+  if let Some(last) = last {
+    v.push(last);
+  }
+  Ok((r, v))
 }
 
 fn statements_finish(
