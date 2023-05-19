@@ -1,5 +1,6 @@
 use std::{
   collections::HashMap,
+  error::Error,
   fmt::Display,
   io::{BufReader, BufWriter, Read, Write},
 };
@@ -12,8 +13,9 @@ use nom::{
   bytes::complete::tag,
   character::complete::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
+    none_of,
   },
-  combinator::{opt, recognize},
+  combinator::{map_res, opt, recognize},
   error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
@@ -162,7 +164,7 @@ impl Display for Value {
   ) -> std::fmt::Result {
     match self {
       Self::F64(value) => write!(f, "{value}"),
-      Self::Str(value) => write!(f, "{value:?}"),
+      Self::Str(value) => write!(f, "{value}"),
     }
   }
 }
@@ -338,34 +340,38 @@ impl FnDef {
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {
-    use OpCode::*;
-    writeln!(writer, "  Literals [{}]", self.literals.len())?;
-    for (i, con) in self.literals.iter().enumerate() {
-      writeln!(writer, "    [{i}] {}", *con)?;
-    }
-
-    writeln!(
-      writer,
-      "  Instructions [{}]",
-      self.instructions.len()
-    )?;
-    for (i, inst) in self.instructions.iter().enumerate() {
-      match inst.op {
-        LoadLiteral => writeln!(
-          writer,
-          "    [{i}] {:?} {} ({:?})",
-          inst.op, inst.arg0, self.literals[inst.arg0 as usize]
-        )?,
-        Copy | Call | Jmp | Jf | Lt | Pop | Store => writeln!(
-          writer,
-          "    [{i}] {:?} {}",
-          inst.op, inst.arg0
-        )?,
-        _ => writeln!(writer, "    [{i}] {:?}", inst.op)?,
-      }
-    }
-    Ok(())
+    disasm_common(&self.literals, &self.instructions, writer)
   }
+}
+
+fn disasm_common(
+  literals: &[Value],
+  instructions: &[Instruction],
+  writer: &mut impl Write,
+) -> std::io::Result<()> {
+  use OpCode::*;
+  writeln!(writer, "  Literals [{}]", literals.len())?;
+  for (i, con) in literals.iter().enumerate() {
+    writeln!(writer, "    [{i}] {}", *con)?;
+  }
+
+  writeln!(writer, "  Instructions [{}]", instructions.len())?;
+  for (i, inst) in instructions.iter().enumerate() {
+    match inst.op {
+      LoadLiteral => writeln!(
+        writer,
+        "    [{i}] {:?} {} ({:?})",
+        inst.op, inst.arg0, literals[inst.arg0 as usize]
+      )?,
+      Copy | Call | Jmp | Jf | Pop | Store => writeln!(
+        writer,
+        "    [{i}] {:?} {}",
+        inst.op, inst.arg0
+      )?,
+      _ => writeln!(writer, "    [{i}] {:?}", inst.op)?,
+    }
+  }
+  Ok(())
 }
 
 struct Compiler {
@@ -373,6 +379,7 @@ struct Compiler {
   instructions: Vec<Instruction>,
   target_stack: Vec<Target>,
   funcs: HashMap<String, FnDef>,
+  break_ips: Vec<usize>,
 }
 
 impl Compiler {
@@ -382,7 +389,16 @@ impl Compiler {
       instructions: vec![],
       target_stack: vec![],
       funcs: HashMap::new(),
+      break_ips: vec![],
     }
+  }
+
+  fn fixup_breaks(&mut self) {
+    let break_jmp_addr = self.instructions.len();
+    for ip in &self.break_ips {
+      self.instructions[*ip].arg0 = break_jmp_addr as u8;
+    }
+    self.break_ips.clear();
   }
 
   fn add_literal(&mut self, value: Value) -> u8 {
@@ -475,10 +491,19 @@ impl Compiler {
     Ok(())
   }
 
-  fn compile_expr(&mut self, ex: &Expression) -> usize {
-    match ex {
+  fn compile_expr(
+    &mut self,
+    ex: &Expression,
+  ) -> Result<usize, Box<dyn Error>> {
+    Ok(match ex {
       Expression::NumLiteral(num) => {
         let id = self.add_literal(Value::F64(*num));
+        self.add_inst(OpCode::LoadLiteral, id);
+        self.target_stack.push(Target::Literal(id as usize));
+        self.target_stack.len() - 1
+      }
+      Expression::StrLiteral(str) => {
+        let id = self.add_literal(Value::Str(str.clone()));
         self.add_inst(OpCode::LoadLiteral, id);
         self.target_stack.push(Target::Literal(id as usize));
         self.target_stack.len() - 1
@@ -494,7 +519,7 @@ impl Compiler {
           },
         );
         if let Some(var) = var {
-          return var.0;
+          return Ok(var.0);
         } else {
           panic!(
             "Compile error! Variable not found: {ident:?}"
@@ -502,22 +527,22 @@ impl Compiler {
         }
       }
       Expression::Add(lhs, rhs) => {
-        self.bin_op(OpCode::Add, lhs, rhs)
+        self.bin_op(OpCode::Add, lhs, rhs)?
       }
       Expression::Sub(lhs, rhs) => {
-        self.bin_op(OpCode::Sub, lhs, rhs)
+        self.bin_op(OpCode::Sub, lhs, rhs)?
       }
       Expression::Mul(lhs, rhs) => {
-        self.bin_op(OpCode::Mul, lhs, rhs)
+        self.bin_op(OpCode::Mul, lhs, rhs)?
       }
       Expression::Div(lhs, rhs) => {
-        self.bin_op(OpCode::Div, lhs, rhs)
+        self.bin_op(OpCode::Div, lhs, rhs)?
       }
       Expression::Gt(lhs, rhs) => {
-        self.bin_op(OpCode::Lt, rhs, lhs)
+        self.bin_op(OpCode::Lt, rhs, lhs)?
       }
       Expression::Lt(lhs, rhs) => {
-        self.bin_op(OpCode::Lt, lhs, rhs)
+        self.bin_op(OpCode::Lt, lhs, rhs)?
       }
       Expression::FnInvoke(name, args) => {
         let name =
@@ -525,7 +550,7 @@ impl Compiler {
         let args = args
           .iter()
           .map(|arg| self.compile_expr(arg))
-          .collect::<Vec<_>>();
+          .collect::<Result<Vec<_>, _>>()?;
 
         let stack_before_call = self.target_stack.len();
         self.add_inst(OpCode::LoadLiteral, name);
@@ -542,22 +567,39 @@ impl Compiler {
       }
       Expression::If(cond, true_branch, false_branch) => {
         use OpCode::*;
-        let cond = self.compile_expr(cond);
-        self.add_inst(
-          Copy,
-          (self.target_stack.len() - cond - 1) as u8,
-        );
+        let cond = self.compile_expr(cond)?;
+        self.add_copy_inst(cond);
         let jf_inst = self.add_jf_inst(0);
-        let _true_branch = self.compile_expr(true_branch);
+        let stack_size_before = self.target_stack.len();
+        let t_res = self
+          .compile_stmts(true_branch)?
+          .unwrap_or_else(|| {
+            let id = self.add_literal(Value::F64(0.));
+            self.add_inst(LoadLiteral, id as u8);
+            self.target_stack.len() - 1
+          });
+        if stack_size_before + 1 < t_res {
+          self.add_store_inst(stack_size_before + 1);
+          self.add_pop_until_inst(stack_size_before + 1);
+        }
         if let Some(false_branch) = false_branch.as_ref() {
           let jmp_inst = self.add_inst(Jmp, 0);
           self.instructions[jf_inst].arg0 =
             self.instructions.len() as u8;
-          let fb = self.compile_expr(&false_branch);
-          self.add_inst(
-            Copy,
-            (self.target_stack.len() - fb - 1) as u8,
-          );
+          self
+            .target_stack
+            .resize(stack_size_before, Target::Temp);
+          let f_res = self
+            .compile_stmts(&false_branch)?
+            .unwrap_or_else(|| {
+              let id = self.add_literal(Value::F64(0.));
+              self.add_inst(LoadLiteral, id as u8);
+              self.target_stack.len() - 1
+            });
+          if stack_size_before + 1 < f_res {
+            self.add_store_inst(stack_size_before + 1);
+            self.add_pop_until_inst(stack_size_before + 1);
+          }
           self.instructions[jmp_inst].arg0 =
             self.instructions.len() as u8;
         } else {
@@ -566,7 +608,7 @@ impl Compiler {
         }
         self.target_stack.len() - 1
       }
-    }
+    })
   }
 
   fn bin_op(
@@ -574,34 +616,35 @@ impl Compiler {
     op: OpCode,
     lhs: &Expression,
     rhs: &Expression,
-  ) -> usize {
-    let lhs = self.compile_expr(lhs);
-    let rhs = self.compile_expr(rhs);
+  ) -> Result<usize, Box<dyn Error>> {
+    let lhs = self.compile_expr(lhs)?;
+    let rhs = self.compile_expr(rhs)?;
     self.add_copy_inst(lhs);
     self.add_copy_inst(rhs);
     self.add_inst(op, 0);
     self.target_stack.pop();
     self.target_stack.pop();
     self.target_stack.push(Target::Temp);
-    self.target_stack.len() - 1
+    Ok(self.target_stack.len() - 1)
   }
 
   fn compile_stmts(
     &mut self,
     stmts: &Statements,
-  ) -> Result<(), Box<dyn std::error::Error>> {
+  ) -> Result<Option<usize>, Box<dyn Error>> {
+    let mut last_result = None;
     for stmt in stmts {
       match stmt {
         Statement::Expression(ex) => {
-          self.compile_expr(ex);
+          last_result = Some(self.compile_expr(ex)?);
         }
         Statement::VarDef(vname, ex) => {
-          let ex = self.compile_expr(ex);
+          let ex = self.compile_expr(ex)?;
           self.target_stack[ex] =
             Target::Local(vname.to_string());
         }
         Statement::VarAssign(vname, ex) => {
-          let stk_ex = self.compile_expr(ex);
+          let stk_ex = self.compile_expr(ex)?;
           let (stk_local, _) = self
             .target_stack
             .iter_mut()
@@ -625,8 +668,8 @@ impl Compiler {
           end,
           stmts,
         } => {
-          let stk_start = self.compile_expr(start);
-          let stk_end = self.compile_expr(end);
+          let stk_start = self.compile_expr(start)?;
+          let stk_end = self.compile_expr(end)?;
           dprintln!("start: {stk_start} end: {stk_end}");
           self.add_copy_inst(stk_start);
           let stk_loop_var = self.target_stack.len() - 1;
@@ -653,6 +696,12 @@ impl Compiler {
           self.add_inst(OpCode::Jmp, stk_check_exit as u8);
           self.instructions[jf_inst].arg0 =
             self.instructions.len() as u8;
+          self.fixup_breaks();
+        }
+        Statement::Break => {
+          let break_ip = self.instructions.len();
+          self.add_inst(OpCode::Jmp, 0);
+          self.break_ips.push(break_ip);
         }
         Statement::FnDef { name, args, stmts } => {
           let literals = std::mem::take(&mut self.literals);
@@ -672,7 +721,7 @@ impl Compiler {
         }
       }
     }
-    Ok(())
+    Ok(last_result)
   }
 
   fn compile(
@@ -702,16 +751,15 @@ fn write_program(
   writer: &mut impl Write,
   out_file: &str,
   disasm: bool,
+  show_ast: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let mut compiler = Compiler::new();
-  let stmts = statements_finish(source).map_err(|e| {
-    std::io::Error::new(
-      std::io::ErrorKind::Other,
-      e.to_string(),
-    )
-  })?;
+  let stmts =
+    statements_finish(source).map_err(|e| e.to_string())?;
 
-  dprintln!("AST: {stmts:?}");
+  if show_ast {
+    println!("AST: {stmts:#?}");
+  }
 
   compiler.compile(&stmts)?;
 
@@ -733,6 +781,13 @@ fn print_fn(args: &[Value]) -> Value {
     print!("{:?} ", arg);
   }
   println!("");
+  Value::F64(0.)
+}
+
+fn puts_fn(args: &[Value]) -> Value {
+  for arg in args {
+    print!("{}", arg);
+  }
   Value::F64(0.)
 }
 
@@ -825,6 +880,7 @@ impl ByteCode {
             "log" => binary_fn(f64::log)(args),
             "log10" => unary_fn(f64::log10)(args),
             "print" => print_fn(args),
+            "puts" => puts_fn(args),
             _ => self.interpret(fname, args)?,
           };
           stack.resize(
@@ -923,7 +979,13 @@ fn compile(
     ))
   })?;
   let source = std::fs::read_to_string(src)?;
-  write_program(&source, writer, out_file, args.disasm)
+  write_program(
+    &source,
+    writer,
+    out_file,
+    args.disasm,
+    args.show_ast,
+  )
 }
 
 fn read_program(
@@ -973,6 +1035,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 enum Expression<'src> {
   Ident(&'src str),
   NumLiteral(f64),
+  StrLiteral(String),
   FnInvoke(&'src str, Vec<Expression<'src>>),
   Add(Box<Expression<'src>>, Box<Expression<'src>>),
   Sub(Box<Expression<'src>>, Box<Expression<'src>>),
@@ -982,8 +1045,8 @@ enum Expression<'src> {
   Lt(Box<Expression<'src>>, Box<Expression<'src>>),
   If(
     Box<Expression<'src>>,
-    Box<Expression<'src>>,
-    Option<Box<Expression<'src>>>,
+    Box<Statements<'src>>,
+    Option<Box<Statements<'src>>>,
   ),
 }
 
@@ -998,6 +1061,7 @@ enum Statement<'src> {
     end: Expression<'src>,
     stmts: Statements<'src>,
   },
+  Break,
   FnDef {
     name: &'src str,
     args: Vec<&'src str>,
@@ -1017,7 +1081,7 @@ where
 }
 
 fn factor(i: &str) -> IResult<&str, Expression> {
-  alt((number, func_call, ident, parens))(i)
+  alt((str_literal, number, func_call, ident, parens))(i)
 }
 
 fn func_call(i: &str) -> IResult<&str, Expression> {
@@ -1044,6 +1108,22 @@ fn identifier(input: &str) -> IResult<&str, &str> {
     alt((alpha1, tag("_"))),
     many0(alt((alphanumeric1, tag("_")))),
   ))(input)
+}
+
+fn str_literal(i: &str) -> IResult<&str, Expression> {
+  let (r0, _) = preceded(multispace0, char('\"'))(i)?;
+  let (r, val) = many0(none_of("\""))(r0)?;
+  let (r, _) = terminated(char('"'), multispace0)(r)?;
+  Ok((
+    r,
+    Expression::StrLiteral(
+      val
+        .iter()
+        .collect::<String>()
+        .replace("\\\\", "\\")
+        .replace("\\n", "\n"),
+    ),
+  ))
 }
 
 fn number(input: &str) -> IResult<&str, Expression> {
@@ -1128,10 +1208,22 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
   let (i, _) = space_delimited(tag("if"))(i)?;
   let (i, cond) = expr(i)?;
   let (i, t_case) =
-    delimited(open_brace, expr, close_brace)(i)?;
+    delimited(open_brace, statements, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
     space_delimited(tag("else")),
-    delimited(open_brace, expr, close_brace),
+    alt((
+      delimited(
+        space_delimited(char('{')),
+        statements,
+        space_delimited(char('}')),
+      ),
+      map_res(
+        if_expr,
+        |v| -> Result<Vec<Statement>, nom::error::Error<&str>> {
+          Ok(vec![Statement::Expression(v)])
+        },
+      ),
+    )),
   ))(i)?;
 
   Ok((
@@ -1201,21 +1293,86 @@ fn fn_def_statement(i: &str) -> IResult<&str, Statement> {
   Ok((i, Statement::FnDef { name, args, stmts }))
 }
 
-fn statement(i: &str) -> IResult<&str, Statement> {
-  alt((
-    for_statement,
-    fn_def_statement,
-    terminated(
-      alt((var_def, var_assign, expr_statement)),
-      char(';'),
-    ),
-  ))(i)
+fn break_stmt(input: &str) -> IResult<&str, Statement> {
+  let (r, _) = space_delimited(tag("break"))(input)?;
+  Ok((r, Statement::Break))
+}
+
+fn general_statement<'a>(
+  last: bool,
+) -> impl Fn(&'a str) -> IResult<&'a str, Statement> {
+  let terminator = move |i| -> IResult<&str, ()> {
+    let mut semicolon = pair(tag(";"), multispace0);
+    if last {
+      Ok((opt(semicolon)(i)?.0, ()))
+    } else {
+      Ok((semicolon(i)?.0, ()))
+    }
+  };
+  move |input: &str| {
+    alt((
+      terminated(var_def, terminator),
+      terminated(var_assign, terminator),
+      fn_def_statement,
+      for_statement,
+      terminated(break_stmt, terminator),
+      terminated(expr_statement, terminator),
+    ))(input)
+  }
+}
+
+pub(crate) fn last_statement(
+  input: &str,
+) -> IResult<&str, Statement> {
+  general_statement(true)(input)
+}
+
+pub(crate) fn statement(
+  input: &str,
+) -> IResult<&str, Statement> {
+  general_statement(false)(input)
 }
 
 fn statements(i: &str) -> IResult<&str, Statements> {
-  let (i, stmts) = many0(statement)(i)?;
-  let (i, _) = opt(char(';'))(i)?;
-  Ok((i, stmts))
+  let (r, mut v) = many0(statement)(i)?;
+  let (r, last) = opt(last_statement)(r)?;
+  let (r, _) = opt(multispace0)(r)?;
+  if let Some(last) = last {
+    v.push(last);
+  }
+  Ok((r, v))
+}
+
+#[test]
+fn t_stmts() {
+  let s = "1; 2; 3";
+  assert_eq!(
+    statements(s),
+    Ok((
+      "",
+      vec![
+        Statement::Expression(Expression::NumLiteral(1.)),
+        Statement::Expression(Expression::NumLiteral(2.)),
+        Statement::Expression(Expression::NumLiteral(3.))
+      ]
+    ))
+  );
+}
+
+#[test]
+fn t_stmts_semicolon_terminated() {
+  let s = "1; 2; 3;";
+  assert_eq!(
+    statements(s),
+    Ok((
+      "",
+      vec![
+        Statement::Expression(Expression::NumLiteral(1.)),
+        Statement::Expression(Expression::NumLiteral(2.)),
+        Statement::Expression(Expression::NumLiteral(3.))
+      ]
+    ))
+  );
 }
 
 fn statements_finish(

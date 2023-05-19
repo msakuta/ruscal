@@ -12,6 +12,7 @@ pub struct Args {
   pub source: Option<String>,
   pub output: String,
   pub disasm: bool,
+  pub show_ast: bool,
 }
 
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
@@ -21,6 +22,7 @@ pub fn parse_args() -> Option<Args> {
   let mut source = None;
   let mut output = None;
   let mut disasm = false;
+  let mut show_ast = false;
   let mut show_help = false;
   let mut args_is_empty = true;
 
@@ -40,6 +42,7 @@ pub fn parse_args() -> Option<Args> {
       }
       "-R" => run_mode = RunMode::CompileAndRun,
       "-d" => disasm = true,
+      "-a" => show_ast = true,
       "-D" => {
         DEBUG.store(true, std::sync::atomic::Ordering::Relaxed)
       }
@@ -66,6 +69,7 @@ Options:
     -r       Run bytecode
     -R       Compile and run
     -d       Disassemble compiled code
+    -a       Show AST
     -h       Display help"#,
       exe.unwrap_or_else(|| "29-full-stmt".to_string())
     );
@@ -78,6 +82,7 @@ Options:
     output: output
       .unwrap_or_else(|| "bytecode.bin".to_string()),
     disasm,
+    show_ast,
   })
 }
 
