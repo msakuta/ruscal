@@ -533,7 +533,12 @@ impl Compiler {
           last_result = Some(self.compile_expr(ex)?);
         }
         Statement::VarDef(vname, ex) => {
-          let ex = self.compile_expr(ex)?;
+          let mut ex = self.compile_expr(ex)?;
+          if matches!(self.target_stack[ex.0], Target::Local(_))
+          {
+            self.add_copy_inst(ex);
+            ex = self.stack_top();
+          }
           self.target_stack[ex.0] =
             Target::Local(vname.to_string());
         }
