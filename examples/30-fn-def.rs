@@ -239,6 +239,14 @@ enum Target {
   Local(String),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Absolute Stack Index
+struct StkIdx(usize);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Instruction Pointer
+struct InstPtr(usize);
+
 struct FnDef {
   args: Vec<String>,
   literals: Vec<Value>,
@@ -393,6 +401,10 @@ impl Compiler {
     }
   }
 
+  fn stack_top(&self) -> StkIdx {
+    StkIdx(self.target_stack.len() - 1)
+  }
+
   fn fixup_breaks(&mut self) {
     let break_jmp_addr = self.instructions.len();
     for ip in &self.break_ips {
@@ -417,54 +429,70 @@ impl Compiler {
   }
 
   /// Returns absolute position of inserted value
-  fn add_inst(&mut self, op: OpCode, arg0: u8) -> usize {
+  fn add_inst(&mut self, op: OpCode, arg0: u8) -> InstPtr {
     let inst = self.instructions.len();
     self.instructions.push(Instruction { op, arg0 });
-    inst
+    InstPtr(inst)
   }
 
-  fn add_copy_inst(&mut self, stack_idx: usize) -> usize {
+  fn add_copy_inst(&mut self, stack_idx: StkIdx) -> InstPtr {
     let inst = self.add_inst(
       OpCode::Copy,
-      (self.target_stack.len() - stack_idx - 1) as u8,
+      (self.target_stack.len() - stack_idx.0 - 1) as u8,
     );
     self.target_stack.push(Target::Temp);
     inst
   }
 
-  fn add_binop_inst(&mut self, op: OpCode) -> usize {
+  fn add_binop_inst(&mut self, op: OpCode) -> InstPtr {
     self.target_stack.pop();
     self.add_inst(op, 0)
   }
 
-  fn add_store_inst(&mut self, stack_idx: usize) -> usize {
+  fn add_store_inst(&mut self, stack_idx: StkIdx) -> InstPtr {
+    if self.target_stack.len() < stack_idx.0 + 1 {
+      eprintln!("Compiled bytecode so far:");
+      disasm_common(
+        &self.literals,
+        &self.instructions,
+        &mut std::io::stderr(),
+      )
+      .unwrap();
+      panic!("Target stack undeflow during compilation!");
+    }
     let inst = self.add_inst(
       OpCode::Store,
-      (self.target_stack.len() - stack_idx - 1) as u8,
+      (self.target_stack.len() - stack_idx.0 - 1) as u8,
     );
     self.target_stack.pop();
     inst
   }
 
-  fn add_jf_inst(&mut self, inst_jmp: usize) -> usize {
-    let inst = self.add_inst(OpCode::Jf, inst_jmp as u8);
+  fn add_jf_inst(&mut self) -> InstPtr {
+    // Push with jump address 0, because it will be set later
+    let inst = self.add_inst(OpCode::Jf, 0);
     self.target_stack.pop();
     inst
+  }
+
+  fn fixup_jmp(&mut self, ip: InstPtr) {
+    self.instructions[ip.0].arg0 =
+      self.instructions.len() as u8;
   }
 
   /// Pop until given stack index
   fn add_pop_until_inst(
     &mut self,
-    stack_idx: usize,
-  ) -> Option<usize> {
-    if self.target_stack.len() <= stack_idx {
+    stack_idx: StkIdx,
+  ) -> Option<InstPtr> {
+    if self.target_stack.len() <= stack_idx.0 {
       return None;
     }
     let inst = self.add_inst(
       OpCode::Pop,
-      (self.target_stack.len() - stack_idx - 1) as u8,
+      (self.target_stack.len() - stack_idx.0 - 1) as u8,
     );
-    self.target_stack.resize(stack_idx + 1, Target::Temp);
+    self.target_stack.resize(stack_idx.0 + 1, Target::Temp);
     Some(inst)
   }
 
@@ -494,19 +522,19 @@ impl Compiler {
   fn compile_expr(
     &mut self,
     ex: &Expression,
-  ) -> Result<usize, Box<dyn Error>> {
+  ) -> Result<StkIdx, Box<dyn Error>> {
     Ok(match ex {
       Expression::NumLiteral(num) => {
         let id = self.add_literal(Value::F64(*num));
         self.add_inst(OpCode::LoadLiteral, id);
         self.target_stack.push(Target::Literal(id as usize));
-        self.target_stack.len() - 1
+        self.stack_top()
       }
       Expression::StrLiteral(str) => {
         let id = self.add_literal(Value::Str(str.clone()));
         self.add_inst(OpCode::LoadLiteral, id);
         self.target_stack.push(Target::Literal(id as usize));
-        self.target_stack.len() - 1
+        self.stack_top()
       }
       Expression::Ident(ident) => {
         let var = self.target_stack.iter().enumerate().find(
@@ -519,7 +547,7 @@ impl Compiler {
           },
         );
         if let Some(var) = var {
-          return Ok(var.0);
+          return Ok(StkIdx(var.0));
         } else {
           panic!(
             "Compile error! Variable not found: {ident:?}"
@@ -545,6 +573,7 @@ impl Compiler {
         self.bin_op(OpCode::Lt, lhs, rhs)?
       }
       Expression::FnInvoke(name, args) => {
+        let stack_before_args = self.target_stack.len();
         let name =
           self.add_literal(Value::Str(name.to_string()));
         let args = args
@@ -563,50 +592,42 @@ impl Compiler {
         self
           .target_stack
           .resize(stack_before_call + 1, Target::Temp);
-        self.target_stack.len() - 1
+        if stack_before_args < stack_before_call {
+          self.add_pop_until_inst(StkIdx(stack_before_args));
+        }
+        self.stack_top()
       }
       Expression::If(cond, true_branch, false_branch) => {
         use OpCode::*;
         let cond = self.compile_expr(cond)?;
         self.add_copy_inst(cond);
-        let jf_inst = self.add_jf_inst(0);
+        let jf_inst = self.add_jf_inst();
         let stack_size_before = self.target_stack.len();
-        let t_res = self
-          .compile_stmts(true_branch)?
-          .unwrap_or_else(|| {
-            let id = self.add_literal(Value::F64(0.));
-            self.add_inst(LoadLiteral, id as u8);
-            self.target_stack.len() - 1
-          });
-        if stack_size_before + 1 < t_res {
-          self.add_store_inst(stack_size_before + 1);
-          self.add_pop_until_inst(stack_size_before + 1);
-        }
+        self.compile_stmts(true_branch)?.unwrap_or_else(|| {
+          let id = self.add_literal(Value::F64(0.));
+          self.add_inst(LoadLiteral, id as u8);
+          self.stack_top()
+        });
+        self.collapse_stack(StkIdx(stack_size_before + 1));
         if let Some(false_branch) = false_branch.as_ref() {
           let jmp_inst = self.add_inst(Jmp, 0);
-          self.instructions[jf_inst].arg0 =
-            self.instructions.len() as u8;
+          self.fixup_jmp(jf_inst);
           self
             .target_stack
             .resize(stack_size_before, Target::Temp);
-          let f_res = self
-            .compile_stmts(&false_branch)?
-            .unwrap_or_else(|| {
+          self.compile_stmts(&false_branch)?.unwrap_or_else(
+            || {
               let id = self.add_literal(Value::F64(0.));
               self.add_inst(LoadLiteral, id as u8);
-              self.target_stack.len() - 1
-            });
-          if stack_size_before + 1 < f_res {
-            self.add_store_inst(stack_size_before + 1);
-            self.add_pop_until_inst(stack_size_before + 1);
-          }
-          self.instructions[jmp_inst].arg0 =
-            self.instructions.len() as u8;
+              self.stack_top()
+            },
+          );
+          self.collapse_stack(StkIdx(stack_size_before + 1));
+          self.fixup_jmp(jmp_inst);
         } else {
-          self.instructions[jf_inst].arg0 =
-            self.instructions.len() as u8;
+          self.fixup_jmp(jf_inst);
         }
-        self.target_stack.len() - 1
+        self.stack_top()
       }
     })
   }
@@ -616,7 +637,7 @@ impl Compiler {
     op: OpCode,
     lhs: &Expression,
     rhs: &Expression,
-  ) -> Result<usize, Box<dyn Error>> {
+  ) -> Result<StkIdx, Box<dyn Error>> {
     let lhs = self.compile_expr(lhs)?;
     let rhs = self.compile_expr(rhs)?;
     self.add_copy_inst(lhs);
@@ -625,13 +646,22 @@ impl Compiler {
     self.target_stack.pop();
     self.target_stack.pop();
     self.target_stack.push(Target::Temp);
-    Ok(self.target_stack.len() - 1)
+    Ok(self.stack_top())
+  }
+
+  /// Pop the stack, store it at the target, removing all items higher than the target.
+  /// If the target is equal to or higher than the top, does nothing.
+  fn collapse_stack(&mut self, target: StkIdx) {
+    if target.0 < self.target_stack.len() - 1 {
+      self.add_store_inst(StkIdx(target.0));
+      self.add_pop_until_inst(StkIdx(target.0));
+    }
   }
 
   fn compile_stmts(
     &mut self,
     stmts: &Statements,
-  ) -> Result<Option<usize>, Box<dyn Error>> {
+  ) -> Result<Option<StkIdx>, Box<dyn Error>> {
     let mut last_result = None;
     for stmt in stmts {
       match stmt {
@@ -640,7 +670,7 @@ impl Compiler {
         }
         Statement::VarDef(vname, ex) => {
           let ex = self.compile_expr(ex)?;
-          self.target_stack[ex] =
+          self.target_stack[ex.0] =
             Target::Local(vname.to_string());
         }
         Statement::VarAssign(vname, ex) => {
@@ -660,7 +690,7 @@ impl Compiler {
               "Variable name not found".to_string()
             })?;
           self.add_copy_inst(stk_ex);
-          self.add_store_inst(stk_local);
+          self.add_store_inst(StkIdx(stk_local));
         }
         Statement::For {
           loop_var,
@@ -670,10 +700,10 @@ impl Compiler {
         } => {
           let stk_start = self.compile_expr(start)?;
           let stk_end = self.compile_expr(end)?;
-          dprintln!("start: {stk_start} end: {stk_end}");
+          dprintln!("start: {stk_start:?} end: {stk_end:?}");
           self.add_copy_inst(stk_start);
-          let stk_loop_var = self.target_stack.len() - 1;
-          self.target_stack[stk_loop_var] =
+          let stk_loop_var = self.stack_top();
+          self.target_stack[stk_loop_var.0] =
             Target::Local(loop_var.to_string());
           dprintln!("after start: {:?}", self.target_stack);
           let inst_check_exit = self.instructions.len();
@@ -681,7 +711,7 @@ impl Compiler {
           self.add_copy_inst(stk_end);
           dprintln!("before cmp: {:?}", self.target_stack);
           self.add_binop_inst(OpCode::Lt);
-          let jf_inst = self.add_jf_inst(0);
+          let jf_inst = self.add_jf_inst();
           dprintln!("start in loop: {:?}", self.target_stack);
           self.compile_stmts(stmts)?;
           let one = self.add_literal(Value::F64(1.));
@@ -694,8 +724,7 @@ impl Compiler {
           self.add_store_inst(stk_loop_var);
           self.add_pop_until_inst(stk_loop_var);
           self.add_inst(OpCode::Jmp, inst_check_exit as u8);
-          self.instructions[jf_inst].arg0 =
-            self.instructions.len() as u8;
+          self.fixup_jmp(jf_inst);
           self.fixup_breaks();
         }
         Statement::Break => {
