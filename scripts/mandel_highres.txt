@@ -10,15 +10,10 @@ fn printdensity(d) {
   }
 }
 
-for i in 0 to 9 {
-    printdensity(i);
-}
-puts("\n");
-
-fn mandelconverger(real, imag, iters, creal, cimag) {
-    var r = real;
-    var i = imag;
-    for iters in 0 to 255 {
+fn mandelconverge(creal, cimag) {
+    var r = creal;
+    var i = cimag;
+    for iter in 0 to 255 {
         if r*r + i*i > 4 {
             break;
         };
@@ -26,19 +21,15 @@ fn mandelconverger(real, imag, iters, creal, cimag) {
         i = 2*r*i + cimag;
         r = next_r;
     }
-    iters
+    iter
 }
 
-fn mandelconverge(real, imag) {
-  mandelconverger(real, imag, 0, real, imag);
-}
-
-fn mandelhelp(xmin, xmax, xstep,   ymin, ymax, ystep) {
-    var steps = (ymax - ymin) / ystep;
-    print("xstep", xstep, "ysteps", steps, "ystep", ystep);
-    for iy in 0 to steps {
+fn mandel(xmin, ymin, xstep, ystep, xsteps, ysteps) {
+    var xmax = xmin + xstep * xsteps;
+    var ymax = ymin + ystep * ysteps;
+    print("xstep", xstep, "ysteps", ysteps, "ystep", ystep);
+    for iy in 0 to ysteps {
         var y = iy * (ymax - ymin) * ystep + ymin;
-        var xsteps = (xmax - xmin) / xstep;
         for ix in 0 to xsteps {
             var x = ix * (xmax - xmin) * xstep + xmin;
             printdensity(mandelconverge(x,y));
@@ -47,9 +38,4 @@ fn mandelhelp(xmin, xmax, xstep,   ymin, ymax, ystep) {
     }
 }
 
-fn mandel(realstart, imagstart, realmag, imagmag) {
-  mandelhelp(realstart, realstart+realmag*156, realmag,
-             imagstart, imagstart+imagmag*80, imagmag);
-}
-
-mandel(-2.3, -2.0, 0.025 / 2, 0.05 / 2);
+mandel(-2.3, -2.0, 0.025 / 2, 0.05 / 2, 156, 80);
