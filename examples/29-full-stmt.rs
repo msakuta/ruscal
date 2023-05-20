@@ -256,6 +256,20 @@ impl LoopFrame {
   }
 }
 
+#[derive(Debug)]
+struct LoopStackUnderflowError;
+
+impl Display for LoopStackUnderflowError {
+  fn fmt(
+    &self,
+    f: &mut std::fmt::Formatter<'_>,
+  ) -> std::fmt::Result {
+    write!(f, "A break statement outside loop")
+  }
+}
+
+impl Error for LoopStackUnderflowError {}
+
 struct Compiler {
   literals: Vec<Value>,
   instructions: Vec<Instruction>,
@@ -278,9 +292,8 @@ impl Compiler {
   }
 
   fn fixup_breaks(&mut self) -> Result<(), Box<dyn Error>> {
-    let Some(loop_frame) = self.loop_stack.pop() else {
-      return Err("fixup_breaks outside loop".into());
-    };
+    let loop_frame =
+      self.loop_stack.pop().ok_or(LoopStackUnderflowError)?;
     let break_jmp_addr = self.instructions.len();
     for ip in loop_frame.break_ips {
       self.instructions[ip.0].arg0 = break_jmp_addr as u8;
@@ -580,28 +593,20 @@ impl Compiler {
           self.fixup_breaks()?;
         }
         Statement::Break => {
-          let Some(start) = self.loop_stack
+          let start = self
+            .loop_stack
             .last()
-            .map(|loop_frame| loop_frame.start) else
-          {
-            return Err(
-              "A break statement outside loop".into(),
-            )
-          };
+            .map(|loop_frame| loop_frame.start)
+            .ok_or(LoopStackUnderflowError)?;
           self.add_pop_until_inst(start);
 
-          match self.loop_stack.last_mut() {
-            Some(loop_frame) => {
-              let break_ip = self.instructions.len();
-              loop_frame.break_ips.push(InstPtr(break_ip));
-              self.add_inst(OpCode::Jmp, 0);
-            }
-            _ => {
-              return Err(
-                "A break statement outside loop".into(),
-              )
-            }
-          };
+          let loop_frame = self
+            .loop_stack
+            .last_mut()
+            .ok_or(LoopStackUnderflowError)?;
+          let break_ip = self.instructions.len();
+          loop_frame.break_ips.push(InstPtr(break_ip));
+          self.add_inst(OpCode::Jmp, 0);
         }
       }
     }
