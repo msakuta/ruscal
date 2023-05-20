@@ -1,0 +1,54 @@
+fn printdensity(d) {
+  if d > 8 {
+    puts(" ")
+  } else if d > 4 {
+    puts(".");
+  } else if d > 2 {
+    puts("+");
+  } else {
+    puts("*")
+  }
+}
+
+for i in 0 to 9 {
+    printdensity(i);
+}
+puts("\n");
+
+fn mandelconverger(real, imag, iters, creal, cimag) {
+    var r = real;
+    var i = imag;
+    for iters in 0 to 255 {
+        if r*r + i*i > 4 {
+            break;
+        };
+        r = r*r - i*i + creal;
+        i = 2*r*i + cimag;
+    }
+    iters
+}
+
+fn mandelconverge(real, imag) {
+  mandelconverger(real, imag, 0, real, imag);
+}
+
+fn mandelhelp(xmin, xmax, xstep,   ymin, ymax, ystep) {
+    var steps = (ymax - ymin) / ystep;
+    print("xstep", xstep, "ysteps", steps, "ystep", ystep);
+    for iy in 0 to steps {
+        var y = iy * (ymax - ymin) * ystep + ymin;
+        var xsteps = (xmax - xmin) / xstep;
+        for ix in 0 to xsteps {
+            var x = ix * (xmax - xmin) * xstep + xmin;
+            printdensity(mandelconverge(x,y));
+        }
+        puts("\n");
+    }
+}
+
+fn mandel(realstart, imagstart, realmag, imagmag) {
+  mandelhelp(realstart, realstart+realmag*78, realmag,
+             imagstart, imagstart+imagmag*40, imagmag);
+}
+
+mandel(-2.3, -2.0, 0.025, 0.05);
