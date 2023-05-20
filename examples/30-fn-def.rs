@@ -401,7 +401,7 @@ struct Compiler {
   instructions: Vec<Instruction>,
   target_stack: Vec<Target>,
   funcs: HashMap<String, FnDef>,
-  break_ips: Vec<LoopFrame>,
+  loop_stack: Vec<LoopFrame>,
 }
 
 impl Compiler {
@@ -411,7 +411,7 @@ impl Compiler {
       instructions: vec![],
       target_stack: vec![],
       funcs: HashMap::new(),
-      break_ips: vec![],
+      loop_stack: vec![],
     }
   }
 
@@ -420,7 +420,7 @@ impl Compiler {
   }
 
   fn fixup_breaks(&mut self) -> Result<(), Box<dyn Error>> {
-    let Some(loop_frame) = self.break_ips.pop() else {
+    let Some(loop_frame) = self.loop_stack.pop() else {
       return Err("fixup_breaks outside loop".into());
     };
     let break_jmp_addr = self.instructions.len();
@@ -722,7 +722,7 @@ impl Compiler {
           self.add_binop_inst(OpCode::Lt);
           let jf_inst = self.add_jf_inst();
           dprintln!("start in loop: {:?}", self.target_stack);
-          self.break_ips.push(LoopFrame::new(stk_loop_var));
+          self.loop_stack.push(LoopFrame::new(stk_loop_var));
           self.compile_stmts(stmts)?;
           let one = self.add_literal(Value::F64(1.));
           dprintln!("end in loop: {:?}", self.target_stack);
@@ -738,7 +738,7 @@ impl Compiler {
           self.fixup_breaks()?;
         }
         Statement::Break => {
-          let Some(start) = self.break_ips
+          let Some(start) = self.loop_stack
             .last()
             .map(|loop_frame| loop_frame.start) else
           {
@@ -748,7 +748,7 @@ impl Compiler {
           };
           self.add_pop_until_inst(start);
 
-          match self.break_ips.last_mut() {
+          match self.loop_stack.last_mut() {
             Some(loop_frame) => {
               let break_ip = self.instructions.len();
               loop_frame.break_ips.push(InstPtr(break_ip));
