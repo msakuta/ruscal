@@ -1242,11 +1242,7 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
   let (i, f_case) = opt(preceded(
     space_delimited(tag("else")),
     alt((
-      delimited(
-        space_delimited(char('{')),
-        statements,
-        space_delimited(char('}')),
-      ),
+      delimited(open_brace, statements, close_brace),
       map_res(
         if_expr,
         |v| -> Result<Vec<Statement>, nom::error::Error<&str>> {
