@@ -226,14 +226,6 @@ impl Value {
   }
 }
 
-#[derive(Debug, Clone, Default)]
-enum Target {
-  #[default]
-  Temp,
-  Literal(usize),
-  Local(String),
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 /// Absolute Stack Index
 struct StkIdx(usize);
@@ -241,6 +233,14 @@ struct StkIdx(usize);
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 /// Instruction Pointer
 struct InstPtr(usize);
+
+#[derive(Debug, Clone, Default)]
+enum Target {
+  #[default]
+  Temp,
+  Literal(usize),
+  Local(String),
+}
 
 struct Compiler {
   literals: Vec<Value>,
