@@ -289,6 +289,13 @@ impl Compiler {
     inst
   }
 
+  fn add_jf_inst(&mut self) -> InstPtr {
+    // Push with jump address 0, because it will be set later
+    let inst = self.add_inst(OpCode::Jf, 0);
+    self.target_stack.pop();
+    inst
+  }
+
   fn fixup_jmp(&mut self, ip: InstPtr) {
     self.instructions[ip.0].arg0 =
       self.instructions.len() as u8;
@@ -389,23 +396,20 @@ impl Compiler {
         self.stack_top()
       }
       Expression::If(cond, true_branch, false_branch) => {
-        use OpCode::*;
         let cond = self.compile_expr(cond);
         self.add_copy_inst(cond);
-        let jf_inst = self.add_inst(Jf, 0);
+        let jf_inst = self.add_jf_inst();
         let stack_size_before = self.target_stack.len();
         self.compile_expr(true_branch);
-        self.collapse_stack(StkIdx(stack_size_before + 1));
+        self.coerce_stack(StkIdx(stack_size_before + 1));
+        let jmp_inst = self.add_inst(OpCode::Jmp, 0);
+        self.fixup_jmp(jf_inst);
+        self.target_stack.resize(stack_size_before, 0);
         if let Some(false_branch) = false_branch.as_ref() {
-          let jmp_inst = self.add_inst(Jmp, 0);
-          self.fixup_jmp(jf_inst);
-          self.target_stack.resize(stack_size_before, 0);
           self.compile_expr(&false_branch);
-          self.collapse_stack(StkIdx(stack_size_before + 1));
-          self.fixup_jmp(jmp_inst);
-        } else {
-          self.fixup_jmp(jf_inst);
         }
+        self.coerce_stack(StkIdx(stack_size_before + 1));
+        self.fixup_jmp(jmp_inst);
         self.stack_top()
       }
     }
@@ -426,12 +430,16 @@ impl Compiler {
     self.stack_top()
   }
 
-  /// Pop the stack, store it at the target, removing all items higher than the target.
-  /// If the target is equal to or higher than the top, does nothing.
-  fn collapse_stack(&mut self, target: StkIdx) {
+  /// Coerce the stack size to be target + 1, and move the old top
+  /// to the new top.
+  fn coerce_stack(&mut self, target: StkIdx) {
     if target.0 < self.target_stack.len() - 1 {
-      self.add_store_inst(StkIdx(target.0));
-      self.add_pop_until_inst(StkIdx(target.0));
+      self.add_store_inst(target);
+      self.add_pop_until_inst(target);
+    } else if self.target_stack.len() - 1 < target.0 {
+      for _ in self.target_stack.len() - 1..target.0 {
+        self.add_copy_inst(self.stack_top());
+      }
     }
   }
 
@@ -549,9 +557,8 @@ impl ByteCode {
         }
         OpCode::Store => {
           let idx = stack.len() - instruction.arg0 as usize - 1;
-          let value =
+          stack[idx] =
             stack.pop().expect("Store needs an argument");
-          stack[idx] = value;
         }
         OpCode::Copy => {
           stack.push(

@@ -247,6 +247,20 @@ enum Target {
   Local(String),
 }
 
+struct LoopFrame {
+  start: StkIdx,
+  break_ips: Vec<InstPtr>,
+}
+
+impl LoopFrame {
+  fn new(start: StkIdx) -> Self {
+    Self {
+      start,
+      break_ips: vec![],
+    }
+  }
+}
+
 struct FnDef {
   args: Vec<String>,
   literals: Vec<Value>,
@@ -387,7 +401,7 @@ struct Compiler {
   instructions: Vec<Instruction>,
   target_stack: Vec<Target>,
   funcs: HashMap<String, FnDef>,
-  break_ips: Vec<usize>,
+  break_ips: Vec<LoopFrame>,
 }
 
 impl Compiler {
@@ -405,12 +419,15 @@ impl Compiler {
     StkIdx(self.target_stack.len() - 1)
   }
 
-  fn fixup_breaks(&mut self) {
+  fn fixup_breaks(&mut self) -> Result<(), Box<dyn Error>> {
+    let Some(loop_frame) = self.break_ips.pop() else {
+      return Err("fixup_breaks outside loop".into());
+    };
     let break_jmp_addr = self.instructions.len();
-    for ip in &self.break_ips {
-      self.instructions[*ip].arg0 = break_jmp_addr as u8;
+    for ip in loop_frame.break_ips {
+      self.instructions[ip.0].arg0 = break_jmp_addr as u8;
     }
-    self.break_ips.clear();
+    Ok(())
   }
 
   fn add_literal(&mut self, value: Value) -> u8 {
@@ -549,8 +566,8 @@ impl Compiler {
         if let Some(var) = var {
           return Ok(StkIdx(var.0));
         } else {
-          panic!(
-            "Compile error! Variable not found: {ident:?}"
+          return Err(
+            format!("Variable not found: {ident:?}").into(),
           );
         }
       }
@@ -604,19 +621,17 @@ impl Compiler {
         let jf_inst = self.add_jf_inst();
         let stack_size_before = self.target_stack.len();
         self.compile_stmts_or_zero(true_branch)?;
-        self.collapse_stack(StkIdx(stack_size_before + 1));
+        self.coerce_stack(StkIdx(stack_size_before + 1));
+        let jmp_inst = self.add_inst(Jmp, 0);
+        self.fixup_jmp(jf_inst);
+        self
+          .target_stack
+          .resize(stack_size_before, Target::Temp);
         if let Some(false_branch) = false_branch.as_ref() {
-          let jmp_inst = self.add_inst(Jmp, 0);
-          self.fixup_jmp(jf_inst);
-          self
-            .target_stack
-            .resize(stack_size_before, Target::Temp);
           self.compile_stmts_or_zero(&false_branch)?;
-          self.collapse_stack(StkIdx(stack_size_before + 1));
-          self.fixup_jmp(jmp_inst);
-        } else {
-          self.fixup_jmp(jf_inst);
         }
+        self.coerce_stack(StkIdx(stack_size_before + 1));
+        self.fixup_jmp(jmp_inst);
         self.stack_top()
       }
     })
@@ -639,12 +654,16 @@ impl Compiler {
     Ok(self.stack_top())
   }
 
-  /// Pop the stack, store it at the target, removing all items higher than the target.
-  /// If the target is equal to or higher than the top, does nothing.
-  fn collapse_stack(&mut self, target: StkIdx) {
+  /// Coerce the stack size to be target + 1, and move the old top
+  /// to the new top.
+  fn coerce_stack(&mut self, target: StkIdx) {
     if target.0 < self.target_stack.len() - 1 {
-      self.add_store_inst(StkIdx(target.0));
-      self.add_pop_until_inst(StkIdx(target.0));
+      self.add_store_inst(target);
+      self.add_pop_until_inst(target);
+    } else if self.target_stack.len() - 1 < target.0 {
+      for _ in self.target_stack.len() - 1..target.0 {
+        self.add_copy_inst(self.stack_top());
+      }
     }
   }
 
@@ -677,7 +696,7 @@ impl Compiler {
               }
             })
             .ok_or_else(|| {
-              "Variable name not found".to_string()
+              format!("Variable name not found: {vname}")
             })?;
           self.add_copy_inst(stk_ex);
           self.add_store_inst(StkIdx(stk_local));
@@ -703,6 +722,7 @@ impl Compiler {
           self.add_binop_inst(OpCode::Lt);
           let jf_inst = self.add_jf_inst();
           dprintln!("start in loop: {:?}", self.target_stack);
+          self.break_ips.push(LoopFrame::new(stk_loop_var));
           self.compile_stmts(stmts)?;
           let one = self.add_literal(Value::F64(1.));
           dprintln!("end in loop: {:?}", self.target_stack);
@@ -715,12 +735,31 @@ impl Compiler {
           self.add_pop_until_inst(stk_loop_var);
           self.add_inst(OpCode::Jmp, inst_check_exit as u8);
           self.fixup_jmp(jf_inst);
-          self.fixup_breaks();
+          self.fixup_breaks()?;
         }
         Statement::Break => {
-          let break_ip = self.instructions.len();
-          self.add_inst(OpCode::Jmp, 0);
-          self.break_ips.push(break_ip);
+          let Some(start) = self.break_ips
+            .last()
+            .map(|loop_frame| loop_frame.start) else
+          {
+            return Err(
+              "A break statement outside loop".into(),
+            )
+          };
+          self.add_pop_until_inst(start);
+
+          match self.break_ips.last_mut() {
+            Some(loop_frame) => {
+              let break_ip = self.instructions.len();
+              loop_frame.break_ips.push(InstPtr(break_ip));
+              self.add_inst(OpCode::Jmp, 0);
+            }
+            _ => {
+              return Err(
+                "A break statement outside loop".into(),
+              )
+            }
+          };
         }
         Statement::FnDef { name, args, stmts } => {
           let literals = std::mem::take(&mut self.literals);
