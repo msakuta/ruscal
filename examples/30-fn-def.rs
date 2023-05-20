@@ -603,11 +603,7 @@ impl Compiler {
         self.add_copy_inst(cond);
         let jf_inst = self.add_jf_inst();
         let stack_size_before = self.target_stack.len();
-        self.compile_stmts(true_branch)?.unwrap_or_else(|| {
-          let id = self.add_literal(Value::F64(0.));
-          self.add_inst(LoadLiteral, id as u8);
-          self.stack_top()
-        });
+        self.compile_stmts_or_zero(true_branch)?;
         self.collapse_stack(StkIdx(stack_size_before + 1));
         if let Some(false_branch) = false_branch.as_ref() {
           let jmp_inst = self.add_inst(Jmp, 0);
@@ -615,13 +611,7 @@ impl Compiler {
           self
             .target_stack
             .resize(stack_size_before, Target::Temp);
-          self.compile_stmts(&false_branch)?.unwrap_or_else(
-            || {
-              let id = self.add_literal(Value::F64(0.));
-              self.add_inst(LoadLiteral, id as u8);
-              self.stack_top()
-            },
-          );
+          self.compile_stmts_or_zero(&false_branch)?;
           self.collapse_stack(StkIdx(stack_size_before + 1));
           self.fixup_jmp(jmp_inst);
         } else {
@@ -753,12 +743,23 @@ impl Compiler {
     Ok(last_result)
   }
 
+  fn compile_stmts_or_zero(
+    &mut self,
+    stmts: &Statements,
+  ) -> Result<StkIdx, Box<dyn Error>> {
+    Ok(self.compile_stmts(stmts)?.unwrap_or_else(|| {
+      let id = self.add_literal(Value::F64(0.));
+      self.add_inst(OpCode::LoadLiteral, id as u8);
+      self.stack_top()
+    }))
+  }
+
   fn compile(
     &mut self,
     stmts: &Statements,
   ) -> Result<(), Box<dyn std::error::Error>> {
     let name = "main";
-    self.compile_stmts(stmts)?;
+    self.compile_stmts_or_zero(stmts)?;
     self.add_fn(name.to_string(), &[]);
     Ok(())
   }

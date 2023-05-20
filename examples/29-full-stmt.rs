@@ -444,28 +444,15 @@ impl Compiler {
         self.add_copy_inst(cond);
         let jf_inst = self.add_jf_inst();
         let stack_size_before = self.target_stack.len();
-        let t_res = self
-          .compile_stmts(true_branch)?
-          .unwrap_or_else(|| {
-            let id = self.add_literal(Value::F64(0.));
-            self.add_inst(LoadLiteral, id as u8);
-            self.stack_top()
-          });
+        self.compile_stmts_or_zero(true_branch)?;
         self.collapse_stack(StkIdx(stack_size_before + 1));
-        dbg!(t_res);
         if let Some(false_branch) = false_branch.as_ref() {
           let jmp_inst = self.add_inst(Jmp, 0);
           self.fixup_jmp(jf_inst);
           self
             .target_stack
             .resize(stack_size_before, Target::Temp);
-          self.compile_stmts(&false_branch)?.unwrap_or_else(
-            || {
-              let id = self.add_literal(Value::F64(0.));
-              self.add_inst(LoadLiteral, id as u8);
-              self.stack_top()
-            },
-          );
+          self.compile_stmts_or_zero(&false_branch)?;
           self.collapse_stack(StkIdx(stack_size_before + 1));
           self.fixup_jmp(jmp_inst);
         } else {
@@ -581,6 +568,17 @@ impl Compiler {
     Ok(last_result)
   }
 
+  fn compile_stmts_or_zero(
+    &mut self,
+    stmts: &Statements,
+  ) -> Result<StkIdx, Box<dyn Error>> {
+    Ok(self.compile_stmts(stmts)?.unwrap_or_else(|| {
+      let id = self.add_literal(Value::F64(0.));
+      self.add_inst(OpCode::LoadLiteral, id as u8);
+      self.stack_top()
+    }))
+  }
+
   fn disasm(
     &self,
     writer: &mut impl Write,
@@ -631,7 +629,7 @@ fn write_program(
 
   dprintln!("AST: {stmts:?}");
 
-  compiler.compile_stmts(&stmts)?;
+  compiler.compile_stmts_or_zero(&stmts)?;
 
   if disasm {
     compiler.disasm(&mut std::io::stdout())?;
