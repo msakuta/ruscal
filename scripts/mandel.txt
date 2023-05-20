@@ -1,9 +1,9 @@
 fn printdensity(d) {
-  if d > 8 {
+  if d > 127 {
     puts(" ")
-  } else if d > 4 {
+  } else if d > 8 {
     puts(".");
-  } else if d > 2 {
+  } else if d > 4 {
     puts("+");
   } else {
     puts("*")
@@ -22,8 +22,9 @@ fn mandelconverger(real, imag, iters, creal, cimag) {
         if r*r + i*i > 4 {
             break;
         };
-        r = r*r - i*i + creal;
+        var next_r = r*r - i*i + creal;
         i = 2*r*i + cimag;
+        r = next_r;
     }
     iters
 }
