@@ -289,13 +289,6 @@ impl Compiler {
     inst
   }
 
-  fn add_jf_inst(&mut self) -> InstPtr {
-    // Push with jump address 0, because it will be set later
-    let inst = self.add_inst(OpCode::Jf, 0);
-    self.target_stack.pop();
-    inst
-  }
-
   fn fixup_jmp(&mut self, ip: InstPtr) {
     self.instructions[ip.0].arg0 =
       self.instructions.len() as u8;
@@ -402,6 +395,7 @@ impl Compiler {
         let jf_inst = self.add_inst(Jf, 0);
         let stack_size_before = self.target_stack.len();
         self.compile_expr(true_branch);
+        self.collapse_stack(StkIdx(stack_size_before + 1));
         if let Some(false_branch) = false_branch.as_ref() {
           let jmp_inst = self.add_inst(Jmp, 0);
           self.fixup_jmp(jf_inst);
