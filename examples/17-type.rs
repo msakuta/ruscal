@@ -7,7 +7,7 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
     none_of,
   },
-  combinator::{opt, recognize},
+  combinator::{map_res, opt, recognize},
   error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
@@ -28,12 +28,14 @@ fn main() {
     }
   };
 
+  dbg!(&parsed_statements);
+
   let mut frame = StackFrame::new();
 
   eval_stmts(&parsed_statements, &mut frame);
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 enum Value {
   F64(f64),
   I64(i64),
@@ -49,6 +51,23 @@ impl std::fmt::Display for Value {
       Self::F64(v) => write!(f, "{v}"),
       Self::I64(v) => write!(f, "{v}"),
       Self::Str(v) => write!(f, "{v}"),
+    }
+  }
+}
+
+impl PartialOrd for Value {
+  fn partial_cmp(
+    &self,
+    other: &Self,
+  ) -> Option<std::cmp::Ordering> {
+    use Value::*;
+    match (self, other) {
+      (F64(lhs), F64(rhs)) => lhs.partial_cmp(rhs),
+      (I64(lhs), I64(rhs)) => lhs.partial_cmp(rhs),
+      (F64(lhs), I64(rhs)) => lhs.partial_cmp(&(*rhs as f64)),
+      (I64(lhs), F64(rhs)) => (*lhs as f64).partial_cmp(rhs),
+      (Str(lhs), Str(rhs)) => lhs.partial_cmp(rhs),
+      _ => None,
     }
   }
 }
@@ -236,6 +255,12 @@ impl<'src> StackFrame<'src> {
       }),
     );
     funcs.insert(
+      "puts".to_string(),
+      FnDef::Native(NativeFn {
+        code: Box::new(puts_fn),
+      }),
+    );
+    funcs.insert(
       "dbg".to_string(),
       FnDef::Native(NativeFn {
         code: Box::new(p_dbg),
@@ -302,6 +327,13 @@ impl<'src> StackFrame<'src> {
 fn print(values: &[Value]) -> Value {
   println!("print: {}", values[0]);
   Value::I64(0)
+}
+
+fn puts_fn(args: &[Value]) -> Value {
+  for arg in args {
+    print!("{}", arg);
+  }
+  Value::F64(0.)
 }
 
 fn p_dbg(values: &[Value]) -> Value {
@@ -665,7 +697,15 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
     delimited(open_brace, statements, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
     space_delimited(tag("else")),
-    delimited(open_brace, statements, close_brace),
+    alt((
+      delimited(open_brace, statements, close_brace),
+      map_res(
+        if_expr,
+        |v| -> Result<Vec<Statement>, nom::error::Error<&str>> {
+          Ok(vec![Statement::Expression(v)])
+        },
+      ),
+    )),
   ))(i)?;
 
   Ok((
@@ -677,7 +717,6 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
     ),
   ))
 }
-
 fn expr(i: &str) -> IResult<&str, Expression> {
   alt((if_expr, cond_expr, num_expr))(i)
 }
