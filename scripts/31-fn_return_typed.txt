@@ -1,0 +1,9 @@
+
+fn early_return(a: i64, b: i64) -> i64 {
+    if a < b {
+        return a;
+    };
+    b;
+}
+
+print(early_return(1, 2));
