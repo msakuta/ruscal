@@ -870,6 +870,7 @@ impl Compiler {
 }
 
 fn write_program(
+  source_file: &str,
   source: &str,
   writer: &mut impl Write,
   out_file: &str,
@@ -878,7 +879,15 @@ fn write_program(
 ) -> Result<(), Box<dyn std::error::Error>> {
   let mut compiler = Compiler::new();
   let stmts =
-    statements_finish(Span::new(source)).map_err(|e| e.to_string())?;
+    statements_finish(Span::new(source)).map_err(|e| {
+      format!(
+        "{}:{}:{}: {}",
+        source_file,
+        e.input.location_line(),
+        e.input.get_utf8_column(),
+        e
+      )
+    })?;
 
   if show_ast {
     println!("AST: {stmts:#?}");
@@ -886,7 +895,18 @@ fn write_program(
 
   match type_check(&stmts, &mut TypeCheckContext::new()) {
     Ok(_) => println!("Typecheck Ok"),
-    Err(e) => return Err(e.to_string().into()),
+    Err(e) => {
+      return Err(
+        format!(
+          "{}:{}:{}: {}",
+          source_file,
+          e.span.location_line(),
+          e.span.get_utf8_column(),
+          e
+        )
+        .into(),
+      )
+    }
   }
 
   compiler.compile(&stmts)?;
@@ -1162,6 +1182,7 @@ fn compile(
   })?;
   let source = std::fs::read_to_string(src)?;
   write_program(
+    src,
     &source,
     writer,
     out_file,
@@ -1582,8 +1603,7 @@ fn type_check<'src>(
       }
       Statement::Break => {
         // TODO: check types in break out site. For now we disallow break with values like Rust.
-      }
-      // Statement::Continue => (),
+      } // Statement::Continue => (),
     }
   }
   Ok(res)
@@ -1597,7 +1617,11 @@ enum FnDecl<'src> {
 impl<'src> FnDecl<'src> {
   fn args(&self) -> Vec<(&'src str, TypeDecl)> {
     match self {
-      Self::User(user) => user.args.iter().map(|(name, ty)| (*name.fragment(), *ty)).collect(),
+      Self::User(user) => user
+        .args
+        .iter()
+        .map(|(name, ty)| (*name.fragment(), *ty))
+        .collect(),
       Self::Native(code) => code.args.clone(),
     }
   }
@@ -1628,7 +1652,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     RunMode::Compile => {
       let writer = std::fs::File::create(&args.output)?;
       let mut writer = BufWriter::new(writer);
-      if let Err(e) = compile(&mut writer, &args, &args.output) {
+      if let Err(e) = compile(&mut writer, &args, &args.output)
+      {
         eprintln!("Compile Error: {e}");
       }
     }
