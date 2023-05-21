@@ -2031,7 +2031,10 @@ fn type_decl(i: Span) -> IResult<Span, TypeDecl> {
       "f64" => TypeDecl::F64,
       "str" => TypeDecl::Str,
       _ => {
-        panic!("Type annotation has unknown type: {td}")
+        return Err(nom::Err::Failure(nom::error::Error::new(
+          td,
+          nom::error::ErrorKind::Verify,
+        )));
       }
     },
   ))
