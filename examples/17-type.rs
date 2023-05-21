@@ -727,7 +727,6 @@ fn var_def(i: &str) -> IResult<&str, Statement> {
   let (i, name) = space_delimited(identifier)(i)?;
   let (i, _) = space_delimited(char('='))(i)?;
   let (i, expr) = space_delimited(expr)(i)?;
-  let (i, _) = space_delimited(char(';'))(i)?;
   Ok((i, Statement::VarDef(name, expr)))
 }
 
@@ -804,8 +803,8 @@ fn general_statement<'a>(
   };
   move |input| {
     alt((
-      var_def,
-      var_assign,
+      terminated(var_def, terminator),
+      terminated(var_assign, terminator),
       fn_def_statement,
       for_statement,
       terminated(return_statement, terminator),
