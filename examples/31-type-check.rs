@@ -16,7 +16,7 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
     none_of,
   },
-  combinator::{map_res, opt, recognize},
+  combinator::{cut, map_res, opt, recognize},
   error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
@@ -1995,12 +1995,15 @@ fn var_def(i: Span) -> IResult<Span, Statement> {
   let span = i;
   let (i, _) =
     delimited(multispace0, tag("var"), multispace1)(i)?;
-  let (i, name) = space_delimited(identifier)(i)?;
-  let (i, _) = space_delimited(char(':'))(i)?;
-  let (i, td) = type_decl(i)?;
-  let (i, _) = space_delimited(char('='))(i)?;
-  let (i, ex) = space_delimited(expr)(i)?;
-  let (i, _) = space_delimited(char(';'))(i)?;
+  let (i, (name, td, ex)) = cut(|i| {
+    let (i, name) = space_delimited(identifier)(i)?;
+    let (i, _) = space_delimited(char(':'))(i)?;
+    let (i, td) = type_decl(i)?;
+    let (i, _) = space_delimited(char('='))(i)?;
+    let (i, ex) = space_delimited(expr)(i)?;
+    let (i, _) = space_delimited(char(';'))(i)?;
+    Ok((i, (name, td, ex)))
+  })(i)?;
   Ok((
     i,
     Statement::VarDef {
@@ -2034,13 +2037,16 @@ fn expr_statement(i: Span) -> IResult<Span, Statement> {
 
 fn for_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("for"))(i)?;
-  let (i, loop_var) = space_delimited(identifier)(i)?;
-  let (i, _) = space_delimited(tag("in"))(i)?;
-  let (i, start) = space_delimited(expr)(i)?;
-  let (i, _) = space_delimited(tag("to"))(i)?;
-  let (i, end) = space_delimited(expr)(i)?;
-  let (i, stmts) =
-    delimited(open_brace, statements, close_brace)(i)?;
+  let (i, (loop_var, start, end, stmts)) = cut(|i| {
+    let (i, loop_var) = space_delimited(identifier)(i)?;
+    let (i, _) = space_delimited(tag("in"))(i)?;
+    let (i, start) = space_delimited(expr)(i)?;
+    let (i, _) = space_delimited(tag("to"))(i)?;
+    let (i, end) = space_delimited(expr)(i)?;
+    let (i, stmts) =
+      delimited(open_brace, statements, close_brace)(i)?;
+    Ok((i, (loop_var, start, end, stmts)))
+  })(i)?;
   Ok((
     i,
     Statement::For {
@@ -2080,15 +2086,18 @@ fn argument(i: Span) -> IResult<Span, (Span, TypeDecl)> {
 
 fn fn_def_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("fn"))(i)?;
-  let (i, name) = space_delimited(identifier)(i)?;
-  let (i, _) = space_delimited(tag("("))(i)?;
-  let (i, args) =
-    separated_list0(char(','), space_delimited(argument))(i)?;
-  let (i, _) = space_delimited(tag(")"))(i)?;
-  let (i, _) = space_delimited(tag("->"))(i)?;
-  let (i, ret_type) = type_decl(i)?;
-  let (i, stmts) =
-    delimited(open_brace, statements, close_brace)(i)?;
+  let (i, (name, args, ret_type, stmts)) = cut(|i| {
+    let (i, name) = space_delimited(identifier)(i)?;
+    let (i, _) = space_delimited(tag("("))(i)?;
+    let (i, args) =
+      separated_list0(char(','), space_delimited(argument))(i)?;
+    let (i, _) = space_delimited(tag(")"))(i)?;
+    let (i, _) = space_delimited(tag("->"))(i)?;
+    let (i, ret_type) = type_decl(i)?;
+    let (i, stmts) =
+      delimited(open_brace, statements, close_brace)(i)?;
+    Ok((i, (name, args, ret_type, stmts)))
+  })(i)?;
   Ok((
     i,
     Statement::FnDef {
