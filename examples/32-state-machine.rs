@@ -1118,7 +1118,9 @@ impl<'code> Vm<'code> {
             .ok_or_else(|| "Stack underflow".to_string())?;
           let args = top_frame.args;
 
-          if self.stack_frames.pop().is_none() {
+          if self.stack_frames.pop().is_none()
+            || self.stack_frames.is_empty()
+          {
             return Ok(YieldResult::Finished(res));
           }
 
