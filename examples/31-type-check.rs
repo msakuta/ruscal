@@ -2020,6 +2020,7 @@ fn var_assign(i: Span) -> IResult<Span, Statement> {
   let (i, name) = space_delimited(identifier)(i)?;
   let (i, _) = space_delimited(char('='))(i)?;
   let (i, ex) = space_delimited(expr)(i)?;
+  let (i, _) = space_delimited(char(';'))(i)?;
   Ok((
     i,
     Statement::VarAssign {
