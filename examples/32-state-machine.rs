@@ -6,6 +6,7 @@ use std::{
 };
 
 use ::rusty_programmer::{dprintln, parse_args, RunMode};
+use nom_locate::LocatedSpan;
 use rusty_programmer::Args;
 
 use nom::{
@@ -15,12 +16,12 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
     none_of,
   },
-  combinator::{map_res, opt, recognize},
+  combinator::{opt, recognize},
   error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
   sequence::{delimited, pair, preceded, terminated},
-  Finish, IResult, Parser,
+  Finish, IResult, InputTake, Offset, Parser,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -46,20 +47,20 @@ pub enum OpCode {
 }
 
 macro_rules! impl_op_from {
-  ($($op:ident),*) => {
-    impl From<u8> for OpCode {
-      #[allow(non_upper_case_globals)]
-      fn from(o: u8) -> Self {
-        $(const $op: u8 = OpCode::$op as u8;)*
+    ($($op:ident),*) => {
+      impl From<u8> for OpCode {
+        #[allow(non_upper_case_globals)]
+        fn from(o: u8) -> Self {
+          $(const $op: u8 = OpCode::$op as u8;)*
 
-        match o {
-          $($op => Self::$op,)*
-          _ => panic!("Opcode \"{:02X}\" unrecognized!", o),
+          match o {
+            $($op => Self::$op,)*
+            _ => panic!("Opcode \"{:02X}\" unrecognized!", o),
+          }
         }
       }
     }
   }
-}
 
 impl_op_from!(
   LoadLiteral,
@@ -142,12 +143,14 @@ fn deserialize_str(
 #[repr(u8)]
 enum ValueKind {
   F64,
+  I64,
   Str,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 enum Value {
   F64(f64),
+  I64(i64),
   Str(String),
 }
 
@@ -164,6 +167,7 @@ impl Display for Value {
   ) -> std::fmt::Result {
     match self {
       Self::F64(value) => write!(f, "{value}"),
+      Self::I64(value) => write!(f, "{value}"),
       Self::Str(value) => write!(f, "{value}"),
     }
   }
@@ -173,6 +177,7 @@ impl Value {
   fn kind(&self) -> ValueKind {
     match self {
       Self::F64(_) => ValueKind::F64,
+      Self::I64(_) => ValueKind::I64,
       Self::Str(_) => ValueKind::Str,
     }
   }
@@ -187,6 +192,9 @@ impl Value {
       Self::F64(value) => {
         writer.write_all(&value.to_le_bytes())?;
       }
+      Self::I64(value) => {
+        writer.write_all(&value.to_le_bytes())?;
+      }
       Self::Str(value) => {
         serialize_str(value, writer)?;
       }
@@ -199,6 +207,7 @@ impl Value {
     reader: &mut impl Read,
   ) -> std::io::Result<Self> {
     const F64: u8 = ValueKind::F64 as u8;
+    const I64: u8 = ValueKind::I64 as u8;
     const Str: u8 = ValueKind::Str as u8;
 
     let mut kind_buf = [0u8; 1];
@@ -208,6 +217,11 @@ impl Value {
         let mut buf = [0u8; std::mem::size_of::<f64>()];
         reader.read_exact(&mut buf)?;
         Ok(Value::F64(f64::from_le_bytes(buf)))
+      }
+      I64 => {
+        let mut buf = [0u8; std::mem::size_of::<i64>()];
+        reader.read_exact(&mut buf)?;
+        Ok(Value::I64(i64::from_le_bytes(buf)))
       }
       Str => Ok(Value::Str(deserialize_str(reader)?)),
       _ => Err(std::io::Error::new(
@@ -223,10 +237,30 @@ impl Value {
   fn coerce_f64(&self) -> f64 {
     match self {
       Self::F64(value) => *value,
+      Self::I64(value) => *value as f64,
       _ => panic!(
         "Coercion failed: {:?} cannot be coerced to f64",
         self
       ),
+    }
+  }
+
+  fn coerce_i64(&self) -> i64 {
+    match self {
+      Self::F64(value) => *value as i64,
+      Self::I64(value) => *value,
+      _ => panic!(
+        "Coercion failed: {:?} cannot be coerced to i64",
+        self
+      ),
+    }
+  }
+
+  fn coerce_str(&self) -> String {
+    match self {
+      Self::F64(value) => format!("{value}"),
+      Self::I64(value) => format!("{value}"),
+      Self::Str(value) => value.clone(),
     }
   }
 }
@@ -261,13 +295,13 @@ impl LoopFrame {
   }
 }
 
-struct FnDef {
+struct FnByteCode {
   args: Vec<String>,
   literals: Vec<Value>,
   instructions: Vec<Instruction>,
 }
 
-impl FnDef {
+impl FnByteCode {
   fn write_args(
     args: &[String],
     writer: &mut impl Write,
@@ -414,7 +448,7 @@ struct Compiler {
   literals: Vec<Value>,
   instructions: Vec<Instruction>,
   target_stack: Vec<Target>,
-  funcs: HashMap<String, FnDef>,
+  funcs: HashMap<String, FnByteCode>,
   loop_stack: Vec<LoopFrame>,
 }
 
@@ -526,11 +560,18 @@ impl Compiler {
     Some(inst)
   }
 
-  fn add_fn(&mut self, name: String, args: &[&str]) {
+  fn add_fn(
+    &mut self,
+    name: String,
+    args: &[(Span, TypeDecl)],
+  ) {
     self.funcs.insert(
       name,
-      FnDef {
-        args: args.iter().map(|arg| arg.to_string()).collect(),
+      FnByteCode {
+        args: args
+          .iter()
+          .map(|(arg, _)| arg.to_string())
+          .collect(),
         literals: std::mem::take(&mut self.literals),
         instructions: std::mem::take(&mut self.instructions),
       },
@@ -553,24 +594,24 @@ impl Compiler {
     &mut self,
     ex: &Expression,
   ) -> Result<StkIdx, Box<dyn Error>> {
-    Ok(match ex {
-      Expression::NumLiteral(num) => {
+    Ok(match &ex.expr {
+      ExprEnum::NumLiteral(num) => {
         let id = self.add_literal(Value::F64(*num));
         self.add_inst(OpCode::LoadLiteral, id);
         self.target_stack.push(Target::Literal(id as usize));
         self.stack_top()
       }
-      Expression::StrLiteral(str) => {
+      ExprEnum::StrLiteral(str) => {
         let id = self.add_literal(Value::Str(str.clone()));
         self.add_inst(OpCode::LoadLiteral, id);
         self.target_stack.push(Target::Literal(id as usize));
         self.stack_top()
       }
-      Expression::Ident(ident) => {
+      ExprEnum::Ident(ident) => {
         let var = self.target_stack.iter().enumerate().find(
           |(_i, tgt)| {
             if let Target::Local(id) = tgt {
-              id == ident
+              id == ident.fragment()
             } else {
               false
             }
@@ -584,25 +625,25 @@ impl Compiler {
           );
         }
       }
-      Expression::Add(lhs, rhs) => {
+      ExprEnum::Add(lhs, rhs) => {
         self.bin_op(OpCode::Add, lhs, rhs)?
       }
-      Expression::Sub(lhs, rhs) => {
+      ExprEnum::Sub(lhs, rhs) => {
         self.bin_op(OpCode::Sub, lhs, rhs)?
       }
-      Expression::Mul(lhs, rhs) => {
+      ExprEnum::Mul(lhs, rhs) => {
         self.bin_op(OpCode::Mul, lhs, rhs)?
       }
-      Expression::Div(lhs, rhs) => {
+      ExprEnum::Div(lhs, rhs) => {
         self.bin_op(OpCode::Div, lhs, rhs)?
       }
-      Expression::Gt(lhs, rhs) => {
+      ExprEnum::Gt(lhs, rhs) => {
         self.bin_op(OpCode::Lt, rhs, lhs)?
       }
-      Expression::Lt(lhs, rhs) => {
+      ExprEnum::Lt(lhs, rhs) => {
         self.bin_op(OpCode::Lt, lhs, rhs)?
       }
-      Expression::FnInvoke(name, args) => {
+      ExprEnum::FnInvoke(name, args) => {
         let stack_before_args = self.target_stack.len();
         let name =
           self.add_literal(Value::Str(name.to_string()));
@@ -625,7 +666,7 @@ impl Compiler {
         self.coerce_stack(StkIdx(stack_before_args));
         self.stack_top()
       }
-      Expression::If(cond, true_branch, false_branch) => {
+      ExprEnum::If(cond, true_branch, false_branch) => {
         use OpCode::*;
         let cond = self.compile_expr(cond)?;
         self.add_copy_inst(cond);
@@ -688,7 +729,7 @@ impl Compiler {
         Statement::Expression(ex) => {
           last_result = Some(self.compile_expr(ex)?);
         }
-        Statement::VarDef(vname, ex) => {
+        Statement::VarDef(vname, _, ex) => {
           let mut ex = self.compile_expr(ex)?;
           if matches!(self.target_stack[ex.0], Target::Local(_))
           {
@@ -706,7 +747,7 @@ impl Compiler {
             .enumerate()
             .find(|(_, tgt)| {
               if let Target::Local(tgt) = tgt {
-                tgt == vname
+                tgt == vname.fragment()
               } else {
                 false
               }
@@ -769,7 +810,9 @@ impl Compiler {
           loop_frame.break_ips.push(InstPtr(break_ip));
           self.add_inst(OpCode::Jmp, 0);
         }
-        Statement::FnDef { name, args, stmts } => {
+        Statement::FnDef {
+          name, args, stmts, ..
+        } => {
           let literals = std::mem::take(&mut self.literals);
           let instructions =
             std::mem::take(&mut self.instructions);
@@ -777,7 +820,7 @@ impl Compiler {
             std::mem::take(&mut self.target_stack);
           self.target_stack = args
             .iter()
-            .map(|arg| Target::Local(arg.to_string()))
+            .map(|arg| Target::Local(arg.0.to_string()))
             .collect();
           self.compile_stmts(stmts)?;
           self.add_fn(name.to_string(), args);
@@ -827,6 +870,7 @@ impl Compiler {
 }
 
 fn write_program(
+  source_file: &str,
   source: &str,
   writer: &mut impl Write,
   out_file: &str,
@@ -835,10 +879,34 @@ fn write_program(
 ) -> Result<(), Box<dyn std::error::Error>> {
   let mut compiler = Compiler::new();
   let stmts =
-    statements_finish(source).map_err(|e| e.to_string())?;
+    statements_finish(Span::new(source)).map_err(|e| {
+      format!(
+        "{}:{}:{}: {}",
+        source_file,
+        e.input.location_line(),
+        e.input.get_utf8_column(),
+        e
+      )
+    })?;
 
   if show_ast {
     println!("AST: {stmts:#?}");
+  }
+
+  match type_check(&stmts, &mut TypeCheckContext::new()) {
+    Ok(_) => println!("Typecheck Ok"),
+    Err(e) => {
+      return Err(
+        format!(
+          "{}:{}:{}: {}",
+          source_file,
+          e.span.location_line(),
+          e.span.get_utf8_column(),
+          e
+        )
+        .into(),
+      )
+    }
   }
 
   compiler.compile(&stmts)?;
@@ -864,6 +932,11 @@ fn print_fn(args: &[Value]) -> Value {
   Value::F64(0.)
 }
 
+fn dbg_fn(values: &[Value]) -> Value {
+  println!("dbg: {:?}", values[0]);
+  Value::I64(0)
+}
+
 fn puts_fn(args: &[Value]) -> Value {
   for arg in args {
     print!("{}", arg);
@@ -887,110 +960,225 @@ impl ByteCode {
     reader: &mut impl Read,
   ) -> std::io::Result<()> {
     let num_funcs = deserialize_size(reader)?;
-    let mut funcs = HashMap::new();
+    let mut funcs: HashMap<_, _> = standard_functions()
+      .into_iter()
+      .filter_map(|(name, f)| {
+        if let FnDecl::Native(f) = f {
+          Some((name, FnDef::Native(f)))
+        } else {
+          None
+        }
+      })
+      .collect();
     for _ in 0..num_funcs {
       let name = deserialize_str(reader)?;
-      funcs.insert(name, FnDef::deserialize(reader)?);
+      funcs.insert(
+        name,
+        FnDef::User(FnByteCode::deserialize(reader)?),
+      );
     }
     self.funcs = funcs;
     Ok(())
   }
+}
 
-  fn interpret(
-    &self,
+struct StackFrame<'f> {
+  fn_def: &'f FnByteCode,
+  args: usize,
+  stack: Vec<Value>,
+  ip: usize,
+}
+
+impl<'f> StackFrame<'f> {
+  fn new(fn_def: &'f FnByteCode, args: Vec<Value>) -> Self {
+    Self {
+      fn_def,
+      args: args.len(),
+      stack: args,
+      ip: 0,
+    }
+  }
+
+  fn inst(&self) -> Option<Instruction> {
+    let ret = self.fn_def.instructions.get(self.ip)?;
+    dprintln!(
+      "interpret[{}]: {:?} stack: {:?}",
+      self.ip,
+      ret,
+      self.stack
+    );
+    Some(*ret)
+  }
+}
+
+struct Vm<'code> {
+  bytecode: &'code ByteCode,
+  stack_frames: Vec<StackFrame<'code>>,
+}
+
+impl<'code> Vm<'code> {
+  fn new(bytecode: &'code ByteCode) -> Self {
+    Self {
+      bytecode,
+      stack_frames: vec![],
+    }
+  }
+
+  fn top(&self) -> Result<&StackFrame, String> {
+    self
+      .stack_frames
+      .last()
+      .ok_or_else(|| "Stack frame underflow".to_string())
+  }
+
+  fn top_mut(
+    &mut self,
+  ) -> Result<&mut StackFrame<'code>, String> {
+    self
+      .stack_frames
+      .last_mut()
+      .ok_or_else(|| "Stack frame underflow".to_string())
+  }
+
+  fn run_fn(
+    &mut self,
     fn_name: &str,
     args: &[Value],
   ) -> Result<Value, Box<dyn std::error::Error>> {
-    let fn_def = self.funcs.get(fn_name).ok_or_else(|| {
-      format!("Function {fn_name:?} was not found")
-    })?;
-    let mut stack = args.to_vec();
-    let mut ip = 0;
+    let fn_def =
+      self.bytecode.funcs.get(fn_name).ok_or_else(|| {
+        format!("Function {fn_name:?} was not found")
+      })?;
+    let fn_def = match fn_def {
+      FnDef::User(user) => user,
+      FnDef::Native(n) => return Ok((*n.code)(args)),
+    };
 
-    while ip < fn_def.instructions.len() {
-      let instruction = &fn_def.instructions[ip];
-      dprintln!(
-        "interpret[{ip}]: {instruction:?} stack: {stack:?}"
-      );
+    self
+      .stack_frames
+      .push(StackFrame::new(fn_def, args.to_vec()));
+
+    self.interpret()
+  }
+
+  fn interpret(
+    &mut self,
+  ) -> Result<Value, Box<dyn std::error::Error>> {
+    while let Some(instruction) = self.top()?.inst() {
       match instruction.op {
         OpCode::LoadLiteral => {
-          stack.push(
-            fn_def.literals[instruction.arg0 as usize].clone(),
+          let stack_frame = self.top_mut()?;
+          stack_frame.stack.push(
+            stack_frame.fn_def.literals
+              [instruction.arg0 as usize]
+              .clone(),
           );
         }
         OpCode::Store => {
+          let stack = &mut self.top_mut()?.stack;
           let idx = stack.len() - instruction.arg0 as usize - 1;
           let value =
             stack.pop().expect("Store needs an argument");
           stack[idx] = value;
         }
         OpCode::Copy => {
+          let stack = &mut self.top_mut()?.stack;
           stack.push(
             stack[stack.len() - instruction.arg0 as usize - 1]
               .clone(),
           );
         }
-        OpCode::Add => self
-          .interpret_bin_op(&mut stack, |lhs, rhs| lhs + rhs),
-        OpCode::Sub => self
-          .interpret_bin_op(&mut stack, |lhs, rhs| lhs - rhs),
-        OpCode::Mul => self
-          .interpret_bin_op(&mut stack, |lhs, rhs| lhs * rhs),
-        OpCode::Div => self
-          .interpret_bin_op(&mut stack, |lhs, rhs| lhs / rhs),
+        OpCode::Add => Self::interpret_bin_op_str(
+          &mut self.top_mut()?.stack,
+          |lhs, rhs| lhs + rhs,
+          |lhs, rhs| lhs + rhs,
+          |lhs, rhs| Some(format!("{lhs}{rhs}")),
+        ),
+        OpCode::Sub => Self::interpret_bin_op(
+          &mut self.top_mut()?.stack,
+          |lhs, rhs| lhs - rhs,
+          |lhs, rhs| lhs - rhs,
+        ),
+        OpCode::Mul => Self::interpret_bin_op(
+          &mut self.top_mut()?.stack,
+          |lhs, rhs| lhs * rhs,
+          |lhs, rhs| lhs * rhs,
+        ),
+        OpCode::Div => Self::interpret_bin_op(
+          &mut self.top_mut()?.stack,
+          |lhs, rhs| lhs / rhs,
+          |lhs, rhs| lhs / rhs,
+        ),
         OpCode::Call => {
+          let stack = &self.top()?.stack;
           let args =
             &stack[stack.len() - instruction.arg0 as usize..];
           let fname =
             &stack[stack.len() - instruction.arg0 as usize - 1];
           let Value::Str(fname) = fname else {
-            panic!("Function name shall be a string: {fname:?}");
-          };
-          let res = match fname as &str {
-            "sqrt" => unary_fn(f64::sqrt)(args),
-            "sin" => unary_fn(f64::sin)(args),
-            "cos" => unary_fn(f64::cos)(args),
-            "tan" => unary_fn(f64::tan)(args),
-            "asin" => unary_fn(f64::asin)(args),
-            "acos" => unary_fn(f64::acos)(args),
-            "atan" => unary_fn(f64::atan)(args),
-            "atan2" => binary_fn(f64::atan2)(args),
-            "pow" => binary_fn(f64::powf)(args),
-            "exp" => unary_fn(f64::exp)(args),
-            "log" => binary_fn(f64::log)(args),
-            "log10" => unary_fn(f64::log10)(args),
-            "print" => print_fn(args),
-            "puts" => puts_fn(args),
-            _ => self.interpret(fname, args)?,
-          };
-          stack.resize(
-            stack.len() - instruction.arg0 as usize - 1,
-            Value::F64(0.),
-          );
-          stack.push(res);
+              panic!("Function name shall be a string: {fname:?}");
+            };
+          let fn_def =
+            self.bytecode.funcs.get(fname).ok_or_else(
+              || {
+                format!(
+                  "Function name shall be a string: {fname:?}"
+                )
+              },
+            )?;
+          match fn_def {
+            FnDef::User(user_fn) => {
+              self
+                .stack_frames
+                .push(StackFrame::new(user_fn, args.to_vec()));
+            }
+            FnDef::Native(native) => {
+              let res = (native.code)(
+                &stack[stack.len() - native.args.len()..],
+              );
+              let stack = &mut self.top_mut()?.stack;
+              stack.resize(
+                stack.len() - instruction.arg0 as usize - 1,
+                Value::F64(0.),
+              );
+              stack.push(res);
+            }
+          }
         }
         OpCode::Jmp => {
-          ip = instruction.arg0 as usize;
+          self.top_mut()?.ip = instruction.arg0 as usize;
           continue;
         }
         OpCode::Jf => {
+          let stack = &mut self.top_mut()?.stack;
           let cond = stack.pop().expect("Jf needs an argument");
           if cond.coerce_f64() == 0. {
-            ip = instruction.arg0 as usize;
+            self.top_mut()?.ip = instruction.arg0 as usize;
             continue;
           }
         }
-        OpCode::Lt => self
-          .interpret_bin_op(&mut stack, |lhs, rhs| {
-            (lhs < rhs) as i32 as f64
-          }),
+        OpCode::Lt => Self::interpret_bin_op(
+          &mut self.top_mut()?.stack,
+          |lhs, rhs| (lhs < rhs) as i32 as f64,
+          |lhs, rhs| (lhs < rhs) as i64,
+        ),
         OpCode::Pop => {
+          let stack = &mut self.top_mut()?.stack;
           stack.resize(
             stack.len() - instruction.arg0 as usize,
             Value::default(),
           );
         }
         OpCode::Ret => {
+          let top_frame = self.top_mut()?;
+          let res = top_frame
+            .stack
+            .pop()
+            .ok_or_else(|| "Stack underflow".to_string())?;
+          let args = top_frame.args;
+          let stack = &mut self.top_mut()?.stack;
+          stack.resize(stack.len() - args - 1, Value::F64(0.));
+          stack.push(res);
           return Ok(
             stack
               .pop()
@@ -998,52 +1186,88 @@ impl ByteCode {
           );
         }
       }
-      ip += 1;
+      self.top_mut()?.ip += 1;
     }
 
     Ok(
-      stack
+      self
+        .top_mut()?
+        .stack
         .pop()
         .ok_or_else(|| "Stack underflow".to_string())?,
     )
   }
 
-  fn interpret_bin_op(
-    &self,
+  fn interpret_bin_op_str(
     stack: &mut Vec<Value>,
-    op: impl FnOnce(f64, f64) -> f64,
+    op_f64: impl FnOnce(f64, f64) -> f64,
+    op_i64: impl FnOnce(i64, i64) -> i64,
+    op_str: impl FnOnce(&str, &str) -> Option<String>,
   ) {
-    let rhs =
-      stack.pop().expect("Stack underflow").coerce_f64();
-    let lhs =
-      stack.pop().expect("Stack underflow").coerce_f64();
-    stack.push(Value::F64(op(lhs, rhs)));
+    use Value::*;
+    let rhs = stack.pop().expect("Stack underflow");
+    let lhs = stack.pop().expect("Stack underflow");
+    let res = match (lhs, rhs) {
+      (F64(lhs), F64(rhs)) => F64(op_f64(lhs, rhs)),
+      (I64(lhs), I64(rhs)) => I64(op_i64(lhs, rhs)),
+      (F64(lhs), I64(rhs)) => F64(op_f64(lhs, rhs as f64)),
+      (I64(lhs), F64(rhs)) => F64(op_f64(lhs as f64, rhs)),
+      (Str(lhs), Str(rhs)) => {
+        if let Some(res) = op_str(&lhs, &rhs) {
+          Str(res)
+        } else {
+          panic!("Incompatible types in binary op: {lhs:?} and {rhs:?}");
+        }
+      }
+      (lhs, rhs) => panic!(
+        "Incompatible types in binary op: {lhs:?} and {rhs:?}"
+      ),
+    };
+    stack.push(res);
+  }
+
+  fn interpret_bin_op(
+    stack: &mut Vec<Value>,
+    op_f64: impl FnOnce(f64, f64) -> f64,
+    op_i64: impl FnOnce(i64, i64) -> i64,
+  ) {
+    Self::interpret_bin_op_str(stack, op_f64, op_i64, |_, _| {
+      None
+    })
   }
 }
 
-fn unary_fn(f: fn(f64) -> f64) -> impl Fn(&[Value]) -> Value {
-  move |args| {
-    let arg = args.first().expect("function missing argument");
-    let ret = f(arg.coerce_f64());
-    Value::F64(ret)
-  }
+fn unary_fn<'a>(f: fn(f64) -> f64) -> FnDecl<'a> {
+  FnDecl::Native(NativeFn {
+    args: vec![("lhs", TypeDecl::F64), ("rhs", TypeDecl::F64)],
+    ret_type: TypeDecl::F64,
+    code: Box::new(move |args| {
+      Value::F64(f(args
+        .into_iter()
+        .next()
+        .expect("function missing argument")
+        .coerce_f64()))
+    }),
+  })
 }
 
-fn binary_fn(
-  f: fn(f64, f64) -> f64,
-) -> impl Fn(&[Value]) -> Value {
-  move |args| {
-    let mut args = args.into_iter();
-    let lhs = args
-      .next()
-      .expect("function missing the first argument")
-      .coerce_f64();
-    let rhs = args
-      .next()
-      .expect("function missing the second argument")
-      .coerce_f64();
-    Value::F64(f(lhs, rhs))
-  }
+fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDecl<'a> {
+  FnDecl::Native(NativeFn {
+    args: vec![("lhs", TypeDecl::F64), ("rhs", TypeDecl::F64)],
+    ret_type: TypeDecl::F64,
+    code: Box::new(move |args| {
+      let mut args = args.into_iter();
+      let lhs = args
+        .next()
+        .expect("function missing the first argument")
+        .coerce_f64();
+      let rhs = args
+        .next()
+        .expect("function missing the second argument")
+        .coerce_f64();
+      Value::F64(f(lhs, rhs))
+    }),
+  })
 }
 
 fn compile(
@@ -1060,6 +1284,7 @@ fn compile(
   })?;
   let source = std::fs::read_to_string(src)?;
   write_program(
+    src,
     &source,
     writer,
     out_file,
@@ -1076,6 +1301,452 @@ fn read_program(
   Ok(bytecode)
 }
 
+enum FnDef {
+  User(FnByteCode),
+  Native(NativeFn<'static>),
+}
+
+type Functions<'src> = HashMap<String, FnDecl<'src>>;
+
+fn standard_functions<'src>() -> Functions<'src> {
+  let mut funcs = Functions::new();
+  funcs.insert("sqrt".to_string(), unary_fn(f64::sqrt));
+  funcs.insert("sin".to_string(), unary_fn(f64::sin));
+  funcs.insert("cos".to_string(), unary_fn(f64::cos));
+  funcs.insert("tan".to_string(), unary_fn(f64::tan));
+  funcs.insert("asin".to_string(), unary_fn(f64::asin));
+  funcs.insert("acos".to_string(), unary_fn(f64::acos));
+  funcs.insert("atan".to_string(), unary_fn(f64::atan));
+  funcs.insert("atan2".to_string(), binary_fn(f64::atan2));
+  funcs.insert("pow".to_string(), binary_fn(f64::powf));
+  funcs.insert("exp".to_string(), unary_fn(f64::exp));
+  funcs.insert("log".to_string(), binary_fn(f64::log));
+  funcs.insert("log10".to_string(), unary_fn(f64::log10));
+  funcs.insert(
+    "print".to_string(),
+    FnDecl::Native(NativeFn {
+      args: vec![("arg", TypeDecl::Any)],
+      ret_type: TypeDecl::Any,
+      code: Box::new(print_fn),
+    }),
+  );
+  funcs.insert(
+    "dbg".to_string(),
+    FnDecl::Native(NativeFn {
+      args: vec![("arg", TypeDecl::Any)],
+      ret_type: TypeDecl::Any,
+      code: Box::new(dbg_fn),
+    }),
+  );
+  funcs.insert(
+    "puts".to_string(),
+    FnDecl::Native(NativeFn {
+      args: vec![("arg", TypeDecl::Any)],
+      ret_type: TypeDecl::Any,
+      code: Box::new(puts_fn),
+    }),
+  );
+  funcs.insert(
+    "i64".to_string(),
+    FnDecl::Native(NativeFn {
+      args: vec![("arg", TypeDecl::Any)],
+      ret_type: TypeDecl::I64,
+      code: Box::new(move |args| {
+        Value::I64(
+          args
+            .first()
+            .expect("function missing argument")
+            .coerce_i64(),
+        )
+      }),
+    }),
+  );
+  funcs.insert(
+    "f64".to_string(),
+    FnDecl::Native(NativeFn {
+      args: vec![("arg", TypeDecl::Any)],
+      ret_type: TypeDecl::F64,
+      code: Box::new(move |args| {
+        Value::F64(
+          args
+            .first()
+            .expect("function missing argument")
+            .coerce_f64(),
+        )
+      }),
+    }),
+  );
+  funcs.insert(
+    "str".to_string(),
+    FnDecl::Native(NativeFn {
+      args: vec![("arg", TypeDecl::Any)],
+      ret_type: TypeDecl::Str,
+      code: Box::new(move |args| {
+        Value::Str(
+          args
+            .first()
+            .expect("function missing argument")
+            .coerce_str(),
+        )
+      }),
+    }),
+  );
+  funcs
+}
+
+type Span<'a> = LocatedSpan<&'a str>;
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum TypeDecl {
+  Any,
+  F64,
+  I64,
+  Str,
+}
+
+fn tc_coerce_type<'src>(
+  value: &TypeDecl,
+  target: &TypeDecl,
+  span: Span<'src>,
+) -> Result<TypeDecl, TypeCheckError<'src>> {
+  use TypeDecl::*;
+  Ok(match (value, target) {
+    (_, Any) => value.clone(),
+    (Any, _) => target.clone(),
+    (F64 | I64, F64) => F64,
+    (F64, I64) => F64,
+    (I64, I64) => I64,
+    (Str, Str) => Str,
+    _ => {
+      return Err(TypeCheckError::new(
+        format!(
+          "{:?} cannot be assigned to {:?}",
+          value, target
+        ),
+        span,
+      ))
+    }
+  })
+}
+
+pub struct TypeCheckContext<'src, 'ctx> {
+  /// Variables table for type checking.
+  vars: HashMap<&'src str, TypeDecl>,
+  /// Function names are owned strings because it can be either from source or native.
+  funcs: HashMap<String, FnDecl<'src>>,
+  super_context: Option<&'ctx TypeCheckContext<'src, 'ctx>>,
+}
+
+impl<'src, 'ctx> TypeCheckContext<'src, 'ctx> {
+  pub fn new() -> Self {
+    Self {
+      vars: HashMap::new(),
+      funcs: standard_functions(),
+      super_context: None,
+    }
+  }
+
+  fn get_var(&self, name: &str) -> Option<TypeDecl> {
+    if let Some(val) = self.vars.get(name) {
+      Some(val.clone())
+    } else {
+      None
+    }
+  }
+
+  fn get_fn(&self, name: &str) -> Option<&FnDecl<'src>> {
+    if let Some(val) = self.funcs.get(name) {
+      Some(val)
+    } else if let Some(super_ctx) = self.super_context {
+      super_ctx.get_fn(name)
+    } else {
+      None
+    }
+  }
+
+  fn push_stack(super_ctx: &'ctx Self) -> Self {
+    Self {
+      vars: HashMap::new(),
+      funcs: HashMap::new(),
+      super_context: Some(super_ctx),
+    }
+  }
+}
+
+#[derive(Debug)]
+pub struct TypeCheckError<'src> {
+  msg: String,
+  span: Span<'src>,
+}
+
+impl<'src> std::fmt::Display for TypeCheckError<'src> {
+  fn fmt(
+    &self,
+    f: &mut std::fmt::Formatter<'_>,
+  ) -> std::fmt::Result {
+    write!(
+      f,
+      "{}\nlocation: {}:{}: {}",
+      self.msg,
+      self.span.location_line(),
+      self.span.get_utf8_column(),
+      self.span.fragment()
+    )
+  }
+}
+
+impl<'src> Error for TypeCheckError<'src> {}
+
+impl<'src> TypeCheckError<'src> {
+  fn new(msg: String, span: Span<'src>) -> Self {
+    Self { msg, span }
+  }
+}
+
+fn tc_binary_op<'src>(
+  lhs: &Expression<'src>,
+  rhs: &Expression<'src>,
+  ctx: &mut TypeCheckContext<'src, '_>,
+  op: &str,
+) -> Result<TypeDecl, TypeCheckError<'src>> {
+  let lhst = tc_expr(lhs, ctx)?;
+  let rhst = tc_expr(rhs, ctx)?;
+  binary_op_type(&lhst, &rhst).map_err(|_| {
+    TypeCheckError::new(
+      format!(
+      "Operation {op} between incompatible type: {:?} and {:?}",
+      lhst, rhst,
+    ),
+      lhs.span,
+    )
+  })
+}
+
+fn binary_op_type(
+  lhs: &TypeDecl,
+  rhs: &TypeDecl,
+) -> Result<TypeDecl, ()> {
+  use TypeDecl::*;
+  Ok(match (lhs, rhs) {
+    (Any, _) => Any,
+    (_, Any) => Any,
+    (I64, I64) => I64,
+    (F64 | I64, F64 | I64) => F64,
+    (Str, Str) => Str,
+    _ => return Err(()),
+  })
+}
+
+fn tc_binary_cmp<'src>(
+  lhs: &Expression<'src>,
+  rhs: &Expression<'src>,
+  ctx: &mut TypeCheckContext<'src, '_>,
+  op: &str,
+) -> Result<TypeDecl, TypeCheckError<'src>> {
+  use TypeDecl::*;
+  let lhst = tc_expr(lhs, ctx)?;
+  let rhst = tc_expr(rhs, ctx)?;
+  Ok(match (&lhst, &rhst) {
+    (Any, _) => I64,
+    (_, Any) => I64,
+    (F64, F64) => I64,
+    (I64, I64) => I64,
+    (Str, Str) => I64,
+    _ => {
+      return Err(TypeCheckError::new(
+        format!(
+      "Operation {op} between incompatible type: {:?} and {:?}",
+      lhst, rhst,
+    ),
+        lhs.span,
+      ))
+    }
+  })
+}
+
+fn tc_expr<'src>(
+  e: &Expression<'src>,
+  ctx: &mut TypeCheckContext<'src, '_>,
+) -> Result<TypeDecl, TypeCheckError<'src>> {
+  use ExprEnum::*;
+  Ok(match &e.expr {
+    NumLiteral(_val) => TypeDecl::F64,
+    StrLiteral(_val) => TypeDecl::Str,
+    Ident(str) => ctx.get_var(str).ok_or_else(|| {
+      TypeCheckError::new(
+        format!("Variable {:?} not found in scope", str),
+        e.span,
+      )
+    })?,
+    FnInvoke(str, args) => {
+      let args_ty = args
+        .iter()
+        .map(|v| Ok((tc_expr(v, ctx)?, v.span)))
+        .collect::<Result<Vec<_>, _>>()?;
+      let func = ctx.get_fn(**str).ok_or_else(|| {
+        TypeCheckError::new(
+          format!("function {} is not defined", str),
+          *str,
+        )
+      })?;
+      let args_decl = func.args();
+      for ((arg_ty, arg_span), decl) in
+        args_ty.iter().zip(args_decl.iter())
+      {
+        tc_coerce_type(&arg_ty, &decl.1, *arg_span)?;
+      }
+      func.ret_type()
+    }
+    Add(lhs, rhs) => tc_binary_op(&lhs, &rhs, ctx, "Add")?,
+    Sub(lhs, rhs) => tc_binary_op(&lhs, &rhs, ctx, "Sub")?,
+    Mul(lhs, rhs) => tc_binary_op(&lhs, &rhs, ctx, "Mult")?,
+    Div(lhs, rhs) => tc_binary_op(&lhs, &rhs, ctx, "Div")?,
+    Lt(lhs, rhs) => tc_binary_cmp(&lhs, &rhs, ctx, "LT")?,
+    Gt(lhs, rhs) => tc_binary_cmp(&lhs, &rhs, ctx, "GT")?,
+    If(cond, true_branch, false_branch) => {
+      tc_coerce_type(
+        &tc_expr(cond, ctx)?,
+        &TypeDecl::I64,
+        cond.span,
+      )?;
+      let true_type = type_check(true_branch, ctx)?;
+      if let Some(false_branch) = false_branch {
+        let false_type = type_check(false_branch, ctx)?;
+        binary_op_type(&true_type, &false_type).map_err(
+          |_| {
+            let true_span = true_branch.span();
+            let false_span = false_branch.span();
+            TypeCheckError::new(
+              format!(
+                "Conditional expression doesn't have the \
+            compatible types in true and false branch: \
+            {:?} and {:?}",
+                true_type, false_type
+              ),
+              calc_offset(true_span, false_span),
+            )
+          },
+        )?
+      } else {
+        true_type
+      }
+    }
+  })
+}
+
+fn type_check<'src>(
+  stmts: &Vec<Statement<'src>>,
+  ctx: &mut TypeCheckContext<'src, '_>,
+) -> Result<TypeDecl, TypeCheckError<'src>> {
+  let mut res = TypeDecl::Any;
+  for stmt in stmts {
+    match stmt {
+      Statement::VarDef(var, type_, init_expr) => {
+        let init_type = tc_expr(init_expr, ctx)?;
+        let init_type =
+          tc_coerce_type(&init_type, type_, init_expr.span)?;
+        ctx.vars.insert(**var, init_type);
+      }
+      Statement::VarAssign(var, expr) => {
+        let init_type = tc_expr(expr, ctx)?;
+        let target =
+          ctx.vars.get(**var).expect("Variable not found");
+        tc_coerce_type(
+          &init_type,
+          target,
+          calc_offset(*var, expr.span),
+        )?;
+      }
+      Statement::FnDef {
+        name,
+        args,
+        ret_type,
+        stmts,
+      } => {
+        // Function declaration needs to be added first to allow recursive calls
+        ctx.funcs.insert(
+          name.to_string(),
+          FnDecl::User(UserFn {
+            args: args.clone(),
+            ret_type: *ret_type,
+          }),
+        );
+        let mut subctx = TypeCheckContext::push_stack(ctx);
+        for (arg, ty) in args.iter() {
+          subctx.vars.insert(arg, *ty);
+        }
+        let last_stmt = type_check(stmts, &mut subctx)?;
+        tc_coerce_type(&last_stmt, &ret_type, stmts.span())?;
+      }
+      Statement::Expression(e) => {
+        res = tc_expr(&e, ctx)?;
+      }
+      Statement::For {
+        loop_var,
+        start,
+        end,
+        stmts,
+      } => {
+        tc_coerce_type(
+          &tc_expr(start, ctx)?,
+          &TypeDecl::I64,
+          start.span,
+        )?;
+        tc_coerce_type(
+          &tc_expr(end, ctx)?,
+          &TypeDecl::I64,
+          end.span,
+        )?;
+        ctx.vars.insert(loop_var, TypeDecl::I64);
+        res = type_check(stmts, ctx)?;
+      }
+      Statement::Return(e) => {
+        return tc_expr(e, ctx);
+      }
+      Statement::Break => {
+        // TODO: check types in break out site. For now we disallow break with values like Rust.
+      } // Statement::Continue => (),
+    }
+  }
+  Ok(res)
+}
+
+enum FnDecl<'src> {
+  User(UserFn<'src>),
+  Native(NativeFn<'src>),
+}
+
+impl<'src> FnDecl<'src> {
+  fn args(&self) -> Vec<(&'src str, TypeDecl)> {
+    match self {
+      Self::User(user) => user
+        .args
+        .iter()
+        .map(|(name, ty)| (*name.fragment(), *ty))
+        .collect(),
+      Self::Native(code) => code.args.clone(),
+    }
+  }
+
+  fn ret_type(&self) -> TypeDecl {
+    match self {
+      Self::User(user) => user.ret_type,
+      Self::Native(native) => native.ret_type,
+    }
+  }
+}
+
+struct UserFn<'src> {
+  args: Vec<(Span<'src>, TypeDecl)>,
+  ret_type: TypeDecl,
+}
+
+struct NativeFn<'src> {
+  args: Vec<(&'src str, TypeDecl)>,
+  ret_type: TypeDecl,
+  code: Box<dyn Fn(&[Value]) -> Value>,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let Some(args) = parse_args() else { return Ok(()) };
 
@@ -1083,26 +1754,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     RunMode::Compile => {
       let writer = std::fs::File::create(&args.output)?;
       let mut writer = BufWriter::new(writer);
-      compile(&mut writer, &args, &args.output)?;
+      if let Err(e) = compile(&mut writer, &args, &args.output)
+      {
+        eprintln!("Compile Error: {e}");
+      }
     }
     RunMode::Run(code_file) => {
       let reader = std::fs::File::open(&code_file)?;
       let mut reader = BufReader::new(reader);
       let bytecode = read_program(&mut reader)?;
-      if let Err(e) = bytecode.interpret("main", &[]) {
+      let mut vm = Vm::new(&bytecode);
+      if let Err(e) = vm.run_fn("main", &[]) {
         eprintln!("Runtime error: {e:?}");
       }
     }
     RunMode::CompileAndRun => {
       let mut buf = vec![];
-      compile(
+      if let Err(e) = compile(
         &mut std::io::Cursor::new(&mut buf),
         &args,
         "<Memory>",
-      )?;
+      ) {
+        eprintln!("Compile Error: {e}");
+        return Ok(());
+      }
       let bytecode =
         read_program(&mut std::io::Cursor::new(&mut buf))?;
-      if let Err(e) = bytecode.interpret("main", &[]) {
+      let mut vm = Vm::new(&bytecode);
+      if let Err(e) = vm.run_fn("main", &[]) {
         eprintln!("Runtime error: {e:?}");
       }
     }
@@ -1112,11 +1791,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum Expression<'src> {
-  Ident(&'src str),
+enum ExprEnum<'src> {
+  Ident(Span<'src>),
   NumLiteral(f64),
   StrLiteral(String),
-  FnInvoke(&'src str, Vec<Expression<'src>>),
+  FnInvoke(Span<'src>, Vec<Expression<'src>>),
   Add(Box<Expression<'src>>, Box<Expression<'src>>),
   Sub(Box<Expression<'src>>, Box<Expression<'src>>),
   Mul(Box<Expression<'src>>, Box<Expression<'src>>),
@@ -1131,41 +1810,90 @@ enum Expression<'src> {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+struct Expression<'a> {
+  pub(crate) expr: ExprEnum<'a>,
+  pub(crate) span: Span<'a>,
+}
+
+impl<'a> Expression<'a> {
+  fn new(expr: ExprEnum<'a>, span: Span<'a>) -> Self {
+    Self { expr, span }
+  }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 enum Statement<'src> {
   Expression(Expression<'src>),
-  VarDef(&'src str, Expression<'src>),
-  VarAssign(&'src str, Expression<'src>),
+  VarDef(Span<'src>, TypeDecl, Expression<'src>),
+  VarAssign(Span<'src>, Expression<'src>),
   For {
-    loop_var: &'src str,
+    loop_var: Span<'src>,
     start: Expression<'src>,
     end: Expression<'src>,
     stmts: Statements<'src>,
   },
   Break,
   FnDef {
-    name: &'src str,
-    args: Vec<&'src str>,
+    name: Span<'src>,
+    args: Vec<(Span<'src>, TypeDecl)>,
+    ret_type: TypeDecl,
     stmts: Statements<'src>,
   },
   Return(Expression<'src>),
 }
 
+impl<'src> Statement<'src> {
+  fn span(&self) -> Option<Span<'src>> {
+    use Statement::*;
+    Some(match self {
+      Expression(ex) => ex.span,
+      VarDef(name, _, ex) => calc_offset(*name, ex.span),
+      VarAssign(name, ex) => calc_offset(*name, ex.span),
+      For {
+        loop_var, stmts, ..
+      } => calc_offset(*loop_var, stmts.span()),
+      FnDef { name, stmts, .. } => {
+        calc_offset(*name, stmts.span())
+      }
+      Return(ex) => ex.span,
+      Break => return None,
+    })
+  }
+}
+
+trait GetSpan<'a> {
+  fn span(&self) -> Span<'a>;
+}
+
 type Statements<'a> = Vec<Statement<'a>>;
 
+impl<'a> GetSpan<'a> for Statements<'a> {
+  fn span(&self) -> Span<'a> {
+    self.iter().find_map(|stmt| stmt.span()).unwrap()
+  }
+}
+
 fn space_delimited<'src, O, E>(
-  f: impl Parser<&'src str, O, E>,
-) -> impl FnMut(&'src str) -> IResult<&'src str, O, E>
+  f: impl Parser<Span<'src>, O, E>,
+) -> impl FnMut(Span<'src>) -> IResult<Span<'src>, O, E>
 where
-  E: ParseError<&'src str>,
+  E: ParseError<Span<'src>>,
 {
   delimited(multispace0, f, multispace0)
 }
 
-fn factor(i: &str) -> IResult<&str, Expression> {
-  alt((str_literal, number, func_call, ident, parens))(i)
+/// Calculate offset between the start positions of the input spans and return a span between them.
+///
+/// Note: `i` shall start earlier than `r`, otherwise wrapping would occur.
+fn calc_offset<'a>(i: Span<'a>, r: Span<'a>) -> Span<'a> {
+  i.take(i.offset(&r))
 }
 
-fn func_call(i: &str) -> IResult<&str, Expression> {
+fn factor(i: Span) -> IResult<Span, Expression> {
+  alt((str_literal, num_literal, func_call, ident, parens))(i)
+}
+
+fn func_call(i: Span) -> IResult<Span, Expression> {
   let (r, ident) = space_delimited(identifier)(i)?;
   let (r, args) = space_delimited(delimited(
     tag("("),
@@ -1176,169 +1904,209 @@ fn func_call(i: &str) -> IResult<&str, Expression> {
     )),
     tag(")"),
   ))(r)?;
-  Ok((r, Expression::FnInvoke(ident, args)))
+  Ok((
+    r,
+    Expression {
+      expr: ExprEnum::FnInvoke(ident, args),
+      span: i,
+    },
+  ))
 }
 
-fn ident(input: &str) -> IResult<&str, Expression> {
+fn ident(input: Span) -> IResult<Span, Expression> {
   let (r, res) = space_delimited(identifier)(input)?;
-  Ok((r, Expression::Ident(res)))
+  Ok((
+    r,
+    Expression {
+      expr: ExprEnum::Ident(res),
+      span: input,
+    },
+  ))
 }
 
-fn identifier(input: &str) -> IResult<&str, &str> {
+fn identifier(input: Span) -> IResult<Span, Span> {
   recognize(pair(
     alt((alpha1, tag("_"))),
     many0(alt((alphanumeric1, tag("_")))),
   ))(input)
 }
 
-fn str_literal(i: &str) -> IResult<&str, Expression> {
+fn str_literal(i: Span) -> IResult<Span, Expression> {
   let (r0, _) = preceded(multispace0, char('\"'))(i)?;
   let (r, val) = many0(none_of("\""))(r0)?;
   let (r, _) = terminated(char('"'), multispace0)(r)?;
   Ok((
     r,
-    Expression::StrLiteral(
-      val
-        .iter()
-        .collect::<String>()
-        .replace("\\\\", "\\")
-        .replace("\\n", "\n"),
+    Expression::new(
+      ExprEnum::StrLiteral(
+        val
+          .iter()
+          .collect::<String>()
+          .replace("\\\\", "\\")
+          .replace("\\n", "\n"),
+      ),
+      i,
     ),
   ))
 }
 
-fn number(input: &str) -> IResult<&str, Expression> {
+fn num_literal(input: Span) -> IResult<Span, Expression> {
   let (r, v) = space_delimited(recognize_float)(input)?;
   Ok((
     r,
-    Expression::NumLiteral(v.parse().map_err(|_| {
-      nom::Err::Error(nom::error::Error {
-        input,
-        code: nom::error::ErrorKind::Digit,
-      })
-    })?),
+    Expression::new(
+      ExprEnum::NumLiteral(v.parse().map_err(|_| {
+        nom::Err::Error(nom::error::Error {
+          input,
+          code: nom::error::ErrorKind::Digit,
+        })
+      })?),
+      v,
+    ),
   ))
 }
 
-fn parens(i: &str) -> IResult<&str, Expression> {
+fn parens(i: Span) -> IResult<Span, Expression> {
   space_delimited(delimited(tag("("), expr, tag(")")))(i)
 }
 
-fn term(i: &str) -> IResult<&str, Expression> {
-  let (i, init) = factor(i)?;
+fn term(i: Span) -> IResult<Span, Expression> {
+  let (r, init) = factor(i)?;
 
-  fold_many0(
+  let res = fold_many0(
     pair(space_delimited(alt((char('*'), char('/')))), factor),
     move || init.clone(),
     |acc, (op, val): (char, Expression)| {
+      let span = calc_offset(i, acc.span);
       match op {
-      '*' => Expression::Mul(Box::new(acc), Box::new(val)),
-      '/' => Expression::Div(Box::new(acc), Box::new(val)),
+        '*' => Expression::new(
+          ExprEnum::Mul(Box::new(acc), Box::new(val)),
+          span,
+        ),
+        '/' => Expression::new(
+          ExprEnum::Div(Box::new(acc), Box::new(val)),
+          span,
+        ),
         _ => panic!(
-            "Multiplicative expression should have '*' or '/' operator"
+          "Multiplicative expression should have '*' \
+            or '/' operator"
         ),
       }
     },
-  )(i)
+  )(r);
+  res
 }
 
-fn num_expr(i: &str) -> IResult<&str, Expression> {
-  let (i, init) = term(i)?;
+fn num_expr(i: Span) -> IResult<Span, Expression> {
+  let (r, init) = term(i)?;
 
-  fold_many0(
+  let res = fold_many0(
     pair(space_delimited(alt((char('+'), char('-')))), term),
     move || init.clone(),
-    |acc, (op, val): (char, Expression)| match op {
-      '+' => Expression::Add(Box::new(acc), Box::new(val)),
-      '-' => Expression::Sub(Box::new(acc), Box::new(val)),
-      _ => {
-        panic!(
+    |acc, (op, val): (char, Expression)| {
+      let span = calc_offset(i, acc.span);
+      match op {
+        '+' => Expression::new(
+          ExprEnum::Add(Box::new(acc), Box::new(val)),
+          span,
+        ),
+        '-' => Expression::new(
+          ExprEnum::Sub(Box::new(acc), Box::new(val)),
+          span,
+        ),
+        _ => panic!(
           "Additive expression should have '+' or '-' operator"
-        )
+        ),
       }
     },
-  )(i)
+  )(r);
+  res
 }
 
-fn cond_expr(i: &str) -> IResult<&str, Expression> {
-  let (i, first) = num_expr(i)?;
+fn cond_expr(i0: Span) -> IResult<Span, Expression> {
+  let (i, first) = num_expr(i0)?;
   let (i, cond) =
     space_delimited(alt((char('<'), char('>'))))(i)?;
   let (i, second) = num_expr(i)?;
+  let span = calc_offset(i0, i);
   Ok((
     i,
     match cond {
-      '<' => Expression::Lt(Box::new(first), Box::new(second)),
-      '>' => Expression::Gt(Box::new(first), Box::new(second)),
+      '<' => Expression::new(
+        ExprEnum::Lt(Box::new(first), Box::new(second)),
+        span,
+      ),
+      '>' => Expression::new(
+        ExprEnum::Gt(Box::new(first), Box::new(second)),
+        span,
+      ),
       _ => unreachable!(),
     },
   ))
 }
 
-fn open_brace(i: &str) -> IResult<&str, ()> {
+fn open_brace(i: Span) -> IResult<Span, ()> {
   let (i, _) = space_delimited(char('{'))(i)?;
   Ok((i, ()))
 }
 
-fn close_brace(i: &str) -> IResult<&str, ()> {
+fn close_brace(i: Span) -> IResult<Span, ()> {
   let (i, _) = space_delimited(char('}'))(i)?;
   Ok((i, ()))
 }
 
-fn if_expr(i: &str) -> IResult<&str, Expression> {
-  let (i, _) = space_delimited(tag("if"))(i)?;
+fn if_expr(i0: Span) -> IResult<Span, Expression> {
+  let (i, _) = space_delimited(tag("if"))(i0)?;
   let (i, cond) = expr(i)?;
   let (i, t_case) =
     delimited(open_brace, statements, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
     space_delimited(tag("else")),
-    alt((
-      delimited(open_brace, statements, close_brace),
-      map_res(
-        if_expr,
-        |v| -> Result<Vec<Statement>, nom::error::Error<&str>> {
-          Ok(vec![Statement::Expression(v)])
-        },
-      ),
-    )),
+    delimited(open_brace, statements, close_brace),
   ))(i)?;
 
   Ok((
     i,
-    Expression::If(
-      Box::new(cond),
-      Box::new(t_case),
-      f_case.map(Box::new),
+    Expression::new(
+      ExprEnum::If(
+        Box::new(cond),
+        Box::new(t_case),
+        f_case.map(Box::new),
+      ),
+      calc_offset(i0, i),
     ),
   ))
 }
 
-fn expr(i: &str) -> IResult<&str, Expression> {
+fn expr(i: Span) -> IResult<Span, Expression> {
   alt((if_expr, cond_expr, num_expr))(i)
 }
 
-fn var_def(i: &str) -> IResult<&str, Statement> {
+fn var_def(i: Span) -> IResult<Span, Statement> {
   let (i, _) =
     delimited(multispace0, tag("var"), multispace1)(i)?;
   let (i, name) = space_delimited(identifier)(i)?;
+  let (i, _) = space_delimited(char(':'))(i)?;
+  let (i, td) = type_decl(i)?;
   let (i, _) = space_delimited(char('='))(i)?;
   let (i, expr) = space_delimited(expr)(i)?;
-  Ok((i, Statement::VarDef(name, expr)))
+  let (i, _) = space_delimited(char(';'))(i)?;
+  Ok((i, Statement::VarDef(name, td, expr)))
 }
 
-fn var_assign(i: &str) -> IResult<&str, Statement> {
+fn var_assign(i: Span) -> IResult<Span, Statement> {
   let (i, name) = space_delimited(identifier)(i)?;
   let (i, _) = space_delimited(char('='))(i)?;
   let (i, expr) = space_delimited(expr)(i)?;
   Ok((i, Statement::VarAssign(name, expr)))
 }
 
-fn expr_statement(i: &str) -> IResult<&str, Statement> {
+fn expr_statement(i: Span) -> IResult<Span, Statement> {
   let (i, res) = expr(i)?;
   Ok((i, Statement::Expression(res)))
 }
 
-fn for_statement(i: &str) -> IResult<&str, Statement> {
+fn for_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("for"))(i)?;
   let (i, loop_var) = space_delimited(identifier)(i)?;
   let (i, _) = space_delimited(tag("in"))(i)?;
@@ -1358,33 +2126,74 @@ fn for_statement(i: &str) -> IResult<&str, Statement> {
   ))
 }
 
-fn fn_def_statement(i: &str) -> IResult<&str, Statement> {
+fn type_decl(i: Span) -> IResult<Span, TypeDecl> {
+  let (i, td) = space_delimited(identifier)(i)?;
+  Ok((
+    i,
+    match *td.fragment() {
+      "i64" => TypeDecl::I64,
+      "f64" => TypeDecl::F64,
+      "str" => TypeDecl::Str,
+      _ => {
+        return Err(nom::Err::Failure(nom::error::Error::new(
+          td,
+          nom::error::ErrorKind::Verify,
+        )));
+      }
+    },
+  ))
+}
+
+fn argument(i: Span) -> IResult<Span, (Span, TypeDecl)> {
+  let (i, ident) = space_delimited(identifier)(i)?;
+  let (i, _) = char(':')(i)?;
+  let (i, td) = type_decl(i)?;
+
+  Ok((i, (ident, td)))
+}
+
+fn fn_def_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("fn"))(i)?;
   let (i, name) = space_delimited(identifier)(i)?;
   let (i, _) = space_delimited(tag("("))(i)?;
   let (i, args) =
-    separated_list0(char(','), space_delimited(identifier))(i)?;
+    separated_list0(char(','), space_delimited(argument))(i)?;
   let (i, _) = space_delimited(tag(")"))(i)?;
+  let (i, _) = space_delimited(tag("->"))(i)?;
+  let (i, ret_type) = type_decl(i)?;
   let (i, stmts) =
     delimited(open_brace, statements, close_brace)(i)?;
-  Ok((i, Statement::FnDef { name, args, stmts }))
+  Ok((
+    i,
+    Statement::FnDef {
+      name,
+      args,
+      ret_type,
+      stmts,
+    },
+  ))
 }
 
-fn return_statement(i: &str) -> IResult<&str, Statement> {
+fn return_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("return"))(i)?;
   let (i, ex) = space_delimited(expr)(i)?;
   Ok((i, Statement::Return(ex)))
 }
 
-fn break_stmt(input: &str) -> IResult<&str, Statement> {
-  let (r, _) = space_delimited(tag("break"))(input)?;
-  Ok((r, Statement::Break))
+fn break_statement(i: Span) -> IResult<Span, Statement> {
+  let (i, _) = space_delimited(tag("break"))(i)?;
+  Ok((i, Statement::Break))
 }
+
+// fn continue_statement(i: Span) -> IResult<Span, Statement> {
+//   let (i, _) = space_delimited(tag("continue"))(i)?;
+//   Ok((i, Statement::Continue))
+// }
 
 fn general_statement<'a>(
   last: bool,
-) -> impl Fn(&'a str) -> IResult<&'a str, Statement> {
-  let terminator = move |i| -> IResult<&str, ()> {
+) -> impl Fn(Span<'a>) -> IResult<Span<'a>, Statement> {
+  let terminator = move |i| -> IResult<Span, ()> {
     let mut semicolon = pair(tag(";"), multispace0);
     if last {
       Ok((opt(semicolon)(i)?.0, ()))
@@ -1392,76 +2201,45 @@ fn general_statement<'a>(
       Ok((semicolon(i)?.0, ()))
     }
   };
-  move |input: &str| {
+  move |input| {
     alt((
-      terminated(var_def, terminator),
-      terminated(var_assign, terminator),
+      var_def,
+      var_assign,
       fn_def_statement,
       for_statement,
       terminated(return_statement, terminator),
-      terminated(break_stmt, terminator),
+      terminated(break_statement, terminator),
+      // terminated(continue_statement, terminator),
       terminated(expr_statement, terminator),
     ))(input)
   }
 }
 
 pub(crate) fn last_statement(
-  input: &str,
-) -> IResult<&str, Statement> {
+  input: Span,
+) -> IResult<Span, Statement> {
   general_statement(true)(input)
 }
 
 pub(crate) fn statement(
-  input: &str,
-) -> IResult<&str, Statement> {
+  input: Span,
+) -> IResult<Span, Statement> {
   general_statement(false)(input)
 }
 
-fn statements(i: &str) -> IResult<&str, Statements> {
-  let (r, mut v) = many0(statement)(i)?;
-  let (r, last) = opt(last_statement)(r)?;
-  let (r, _) = opt(multispace0)(r)?;
+fn statements(i: Span) -> IResult<Span, Statements> {
+  let (i, mut stmts) = many0(statement)(i)?;
+  let (i, last) = opt(last_statement)(i)?;
+  let (i, _) = opt(multispace0)(i)?;
   if let Some(last) = last {
-    v.push(last);
+    stmts.push(last);
   }
-  Ok((r, v))
-}
-
-#[test]
-fn t_stmts() {
-  let s = "1; 2; 3";
-  assert_eq!(
-    statements(s),
-    Ok((
-      "",
-      vec![
-        Statement::Expression(Expression::NumLiteral(1.)),
-        Statement::Expression(Expression::NumLiteral(2.)),
-        Statement::Expression(Expression::NumLiteral(3.))
-      ]
-    ))
-  );
-}
-
-#[test]
-fn t_stmts_semicolon_terminated() {
-  let s = "1; 2; 3;";
-  assert_eq!(
-    statements(s),
-    Ok((
-      "",
-      vec![
-        Statement::Expression(Expression::NumLiteral(1.)),
-        Statement::Expression(Expression::NumLiteral(2.)),
-        Statement::Expression(Expression::NumLiteral(3.))
-      ]
-    ))
-  );
+  Ok((i, stmts))
 }
 
 fn statements_finish(
-  i: &str,
-) -> Result<Statements, nom::error::Error<&str>> {
+  i: Span,
+) -> Result<Statements, nom::error::Error<Span>> {
   let (_, res) = statements(i).finish()?;
   Ok(res)
 }
