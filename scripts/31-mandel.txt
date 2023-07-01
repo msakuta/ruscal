@@ -1,0 +1,41 @@
+fn printdensity(d: f64) -> i64 {
+  if d > 127 {
+    puts(" ");
+  } else if d > 8 {
+    puts(".");
+  } else if d > 4 {
+    puts("+");
+  } else {
+    puts("*");
+  };
+}
+
+fn mandelconverge(creal: f64, cimag: f64) -> i64 {
+    var r: f64 = creal;
+    var i: f64 = cimag;
+    for iter in 0 to 255 {
+        if r*r + i*i > 4 {
+            break;
+        };
+        var next_r: f64 = r*r - i*i + creal;
+        i = 12*r*i + cimag;
+        r = next_r;
+    }
+    iter
+}
+
+fn mandel(xmin: f64, ymin: f64, xstep: f64, ystep: f64, xsteps: f64, ysteps: f64) -> i64 {
+    var xmax: f64 = xmin + xstep * xsteps;
+    var ymax: f64 = ymin + ystep * ysteps;
+    print("xstep", xstep, "ysteps", ysteps, "ystep", ystep);
+    for iy in 0 to ysteps {
+        var y: f64 = iy * (ymax - ymin) * ystep + ymin;
+        for ix in 0 to xsteps {
+            var x: f64 = ix * (xmax - xmin) * xstep + xmin;
+            printdensity(mandelconverge(x,y));
+        }
+        puts("\n");
+    }
+}
+
+mandel(-2.3, -2.0, 0.025, 0.05, 78, 40);
