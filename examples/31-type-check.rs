@@ -16,7 +16,7 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
     none_of,
   },
-  combinator::{opt, recognize},
+  combinator::{map_res, opt, recognize},
   error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
@@ -729,7 +729,7 @@ impl Compiler {
         Statement::Expression(ex) => {
           last_result = Some(self.compile_expr(ex)?);
         }
-        Statement::VarDef(vname, _, ex) => {
+        Statement::VarDef(_, vname, _, ex) => {
           let mut ex = self.compile_expr(ex)?;
           if matches!(self.target_stack[ex.0], Target::Local(_))
           {
@@ -1539,7 +1539,7 @@ fn type_check<'src>(
   let mut res = TypeDecl::Any;
   for stmt in stmts {
     match stmt {
-      Statement::VarDef(var, type_, init_expr) => {
+      Statement::VarDef(_, var, type_, init_expr) => {
         let init_type = tc_expr(init_expr, ctx)?;
         let init_type =
           tc_coerce_type(&init_type, type_, init_expr.span)?;
@@ -1720,7 +1720,7 @@ impl<'a> Expression<'a> {
 #[derive(Debug, PartialEq, Clone)]
 enum Statement<'src> {
   Expression(Expression<'src>),
-  VarDef(Span<'src>, TypeDecl, Expression<'src>),
+  VarDef(Span<'src>, Span<'src>, TypeDecl, Expression<'src>),
   VarAssign(Span<'src>, Expression<'src>),
   For {
     loop_var: Span<'src>,
@@ -1743,7 +1743,7 @@ impl<'src> Statement<'src> {
     use Statement::*;
     Some(match self {
       Expression(ex) => ex.span,
-      VarDef(name, _, ex) => calc_offset(*name, ex.span),
+      VarDef(span, _, _, _) => *span,
       VarAssign(name, ex) => calc_offset(*name, ex.span),
       For {
         loop_var, stmts, ..
@@ -1958,7 +1958,15 @@ fn if_expr(i0: Span) -> IResult<Span, Expression> {
     delimited(open_brace, statements, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
     space_delimited(tag("else")),
-    delimited(open_brace, statements, close_brace),
+    alt((
+      delimited(open_brace, statements, close_brace),
+      map_res(
+        if_expr,
+        |v| -> Result<Vec<Statement>, nom::error::Error<&str>> {
+          Ok(vec![Statement::Expression(v)])
+        },
+      ),
+    )),
   ))(i)?;
 
   Ok((
@@ -1979,6 +1987,7 @@ fn expr(i: Span) -> IResult<Span, Expression> {
 }
 
 fn var_def(i: Span) -> IResult<Span, Statement> {
+  let span = i;
   let (i, _) =
     delimited(multispace0, tag("var"), multispace1)(i)?;
   let (i, name) = space_delimited(identifier)(i)?;
@@ -1987,7 +1996,10 @@ fn var_def(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(char('='))(i)?;
   let (i, expr) = space_delimited(expr)(i)?;
   let (i, _) = space_delimited(char(';'))(i)?;
-  Ok((i, Statement::VarDef(name, td, expr)))
+  Ok((
+    i,
+    Statement::VarDef(calc_offset(span, i), name, td, expr),
+  ))
 }
 
 fn var_assign(i: Span) -> IResult<Span, Statement> {
