@@ -729,7 +729,7 @@ impl Compiler {
         Statement::Expression(ex) => {
           last_result = Some(self.compile_expr(ex)?);
         }
-        Statement::VarDef(_, vname, _, ex) => {
+        Statement::VarDef { name, ex, .. } => {
           let mut ex = self.compile_expr(ex)?;
           if matches!(self.target_stack[ex.0], Target::Local(_))
           {
@@ -737,7 +737,7 @@ impl Compiler {
             ex = self.stack_top();
           }
           self.target_stack[ex.0] =
-            Target::Local(vname.to_string());
+            Target::Local(name.to_string());
         }
         Statement::VarAssign(vname, ex) => {
           let stk_ex = self.compile_expr(ex)?;
@@ -1539,11 +1539,11 @@ fn type_check<'src>(
   let mut res = TypeDecl::Any;
   for stmt in stmts {
     match stmt {
-      Statement::VarDef(_, var, type_, init_expr) => {
-        let init_type = tc_expr(init_expr, ctx)?;
+      Statement::VarDef { name, td, ex, .. } => {
+        let init_type = tc_expr(ex, ctx)?;
         let init_type =
-          tc_coerce_type(&init_type, type_, init_expr.span)?;
-        ctx.vars.insert(**var, init_type);
+          tc_coerce_type(&init_type, td, ex.span)?;
+        ctx.vars.insert(**name, init_type);
       }
       Statement::VarAssign(var, expr) => {
         let init_type = tc_expr(expr, ctx)?;
@@ -1720,7 +1720,12 @@ impl<'a> Expression<'a> {
 #[derive(Debug, PartialEq, Clone)]
 enum Statement<'src> {
   Expression(Expression<'src>),
-  VarDef(Span<'src>, Span<'src>, TypeDecl, Expression<'src>),
+  VarDef {
+    span: Span<'src>,
+    name: Span<'src>,
+    td: TypeDecl,
+    ex: Expression<'src>,
+  },
   VarAssign(Span<'src>, Expression<'src>),
   For {
     loop_var: Span<'src>,
@@ -1743,7 +1748,7 @@ impl<'src> Statement<'src> {
     use Statement::*;
     Some(match self {
       Expression(ex) => ex.span,
-      VarDef(span, _, _, _) => *span,
+      VarDef { span, .. } => *span,
       VarAssign(name, ex) => calc_offset(*name, ex.span),
       For {
         loop_var, stmts, ..
@@ -1994,11 +1999,16 @@ fn var_def(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(char(':'))(i)?;
   let (i, td) = type_decl(i)?;
   let (i, _) = space_delimited(char('='))(i)?;
-  let (i, expr) = space_delimited(expr)(i)?;
+  let (i, ex) = space_delimited(expr)(i)?;
   let (i, _) = space_delimited(char(';'))(i)?;
   Ok((
     i,
-    Statement::VarDef(calc_offset(span, i), name, td, expr),
+    Statement::VarDef {
+      span: calc_offset(span, i),
+      name,
+      td,
+      ex,
+    },
   ))
 }
 
