@@ -739,7 +739,7 @@ impl Compiler {
           self.target_stack[ex.0] =
             Target::Local(name.to_string());
         }
-        Statement::VarAssign(vname, ex) => {
+        Statement::VarAssign { name, ex, .. } => {
           let stk_ex = self.compile_expr(ex)?;
           let (stk_local, _) = self
             .target_stack
@@ -747,13 +747,13 @@ impl Compiler {
             .enumerate()
             .find(|(_, tgt)| {
               if let Target::Local(tgt) = tgt {
-                tgt == vname.fragment()
+                tgt == name.fragment()
               } else {
                 false
               }
             })
             .ok_or_else(|| {
-              format!("Variable name not found: {vname}")
+              format!("Variable name not found: {name}")
             })?;
           self.add_copy_inst(stk_ex);
           self.add_store_inst(StkIdx(stk_local));
@@ -1545,15 +1545,11 @@ fn type_check<'src>(
           tc_coerce_type(&init_type, td, ex.span)?;
         ctx.vars.insert(**name, init_type);
       }
-      Statement::VarAssign(var, expr) => {
-        let init_type = tc_expr(expr, ctx)?;
+      Statement::VarAssign { name, ex, .. } => {
+        let init_type = tc_expr(ex, ctx)?;
         let target =
-          ctx.vars.get(**var).expect("Variable not found");
-        tc_coerce_type(
-          &init_type,
-          target,
-          calc_offset(*var, expr.span),
-        )?;
+          ctx.vars.get(**name).expect("Variable not found");
+        tc_coerce_type(&init_type, target, ex.span)?;
       }
       Statement::FnDef {
         name,
@@ -1726,7 +1722,11 @@ enum Statement<'src> {
     td: TypeDecl,
     ex: Expression<'src>,
   },
-  VarAssign(Span<'src>, Expression<'src>),
+  VarAssign {
+    span: Span<'src>,
+    name: Span<'src>,
+    ex: Expression<'src>,
+  },
   For {
     loop_var: Span<'src>,
     start: Expression<'src>,
@@ -1749,7 +1749,7 @@ impl<'src> Statement<'src> {
     Some(match self {
       Expression(ex) => ex.span,
       VarDef { span, .. } => *span,
-      VarAssign(name, ex) => calc_offset(*name, ex.span),
+      VarAssign { span, .. } => *span,
       For {
         loop_var, stmts, ..
       } => calc_offset(*loop_var, stmts.span()),
@@ -2013,10 +2013,18 @@ fn var_def(i: Span) -> IResult<Span, Statement> {
 }
 
 fn var_assign(i: Span) -> IResult<Span, Statement> {
+  let span = i;
   let (i, name) = space_delimited(identifier)(i)?;
   let (i, _) = space_delimited(char('='))(i)?;
-  let (i, expr) = space_delimited(expr)(i)?;
-  Ok((i, Statement::VarAssign(name, expr)))
+  let (i, ex) = space_delimited(expr)(i)?;
+  Ok((
+    i,
+    Statement::VarAssign {
+      span: calc_offset(span, i),
+      name,
+      ex,
+    },
+  ))
 }
 
 fn expr_statement(i: Span) -> IResult<Span, Statement> {
