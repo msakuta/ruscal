@@ -1,0 +1,8 @@
+
+print("Hello");
+
+yield 123;
+
+print("World");
+
+yield 321;

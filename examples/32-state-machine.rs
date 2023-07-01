@@ -44,6 +44,8 @@ pub enum OpCode {
   Pop,
   /// Return current function
   Ret,
+  /// Suspend current function execution where it can resume later.
+  Yield,
 }
 
 macro_rules! impl_op_from {
@@ -75,7 +77,8 @@ impl_op_from!(
   Jf,
   Lt,
   Pop,
-  Ret
+  Ret,
+  Yield
 );
 
 #[derive(Debug, Clone, Copy)]
@@ -831,6 +834,10 @@ impl Compiler {
         Statement::Return(ex) => {
           return Ok(Some(self.compile_expr(ex)?));
         }
+        Statement::Yield(ex) => {
+          let res = self.compile_expr(ex)?;
+          self.add_inst(OpCode::Yield, res.0 as u8);
+        }
       }
     }
     Ok(last_result)
@@ -982,6 +989,11 @@ impl ByteCode {
   }
 }
 
+enum YieldResult {
+  Finished(Value),
+  Suspend(Value),
+}
+
 struct StackFrame<'f> {
   _fn_name: String,
   fn_def: &'f FnByteCode,
@@ -1046,6 +1058,10 @@ impl<'code> Vm<'code> {
       .ok_or_else(|| "Stack frame underflow".to_string())
   }
 
+  /// A convenience function to run a function without the
+  /// ability to suspend execution.
+  /// An yield instruction would be an error.
+  #[allow(dead_code)]
   fn run_fn(
     &mut self,
     fn_name: &str,
@@ -1066,12 +1082,40 @@ impl<'code> Vm<'code> {
       args.to_vec(),
     ));
 
-    self.interpret()
+    match self.interpret()? {
+      YieldResult::Finished(val) => Ok(val),
+      YieldResult::Suspend(_) => {
+        Err("Yielded at toplevel".into())
+      }
+    }
+  }
+
+  fn init_fn(
+    &mut self,
+    fn_name: &str,
+    args: &[Value],
+  ) -> Result<(), Box<dyn std::error::Error>> {
+    let fn_def =
+      self.bytecode.funcs.get(fn_name).ok_or_else(|| {
+        format!("Function {fn_name:?} was not found")
+      })?;
+    let fn_def = match fn_def {
+      FnDef::User(user) => user,
+      FnDef::Native(_) => return Err("Native function cannot be called as a coroutine. Use `run_fn` instead.".into()),
+    };
+
+    self.stack_frames.push(StackFrame::new(
+      fn_name.to_string(),
+      fn_def,
+      args.to_vec(),
+    ));
+
+    Ok(())
   }
 
   fn interpret(
     &mut self,
-  ) -> Result<Value, Box<dyn std::error::Error>> {
+  ) -> Result<YieldResult, Box<dyn std::error::Error>> {
     loop {
       let instruction =
         if let Some(instruction) = self.top()?.inst() {
@@ -1087,7 +1131,7 @@ impl<'code> Vm<'code> {
           let args = top_frame.args;
 
           if self.stack_frames.pop().is_none() {
-            return Ok(res);
+            return Ok(YieldResult::Finished(res));
           }
 
           let stack = &mut self.top_mut()?.stack;
@@ -1213,11 +1257,21 @@ impl<'code> Vm<'code> {
           let stack = &mut self.top_mut()?.stack;
           stack.resize(stack.len() - args - 1, Value::F64(0.));
           stack.push(res);
-          return Ok(
+          return Ok(YieldResult::Finished(
             stack
               .pop()
               .ok_or_else(|| "Stack underflow".to_string())?,
-          );
+          ));
+        }
+        OpCode::Yield => {
+          let top_frame = self.top_mut()?;
+          let res = top_frame
+            .stack
+            .pop()
+            .ok_or_else(|| "Stack underflow".to_string())?;
+          // Increment the ip for the next call
+          top_frame.ip += 1;
+          return Ok(YieldResult::Suspend(res));
         }
       }
       self.top_mut()?.ip += 1;
@@ -1728,6 +1782,10 @@ fn type_check<'src>(
       Statement::Break => {
         // TODO: check types in break out site. For now we disallow break with values like Rust.
       } // Statement::Continue => (),
+      Statement::Yield(e) => {
+        tc_expr(e, ctx)?;
+        // TODO: check type with the return type, but don't escape from this function.
+      }
     }
   }
   Ok(res)
@@ -1772,6 +1830,23 @@ struct NativeFn<'src> {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let Some(args) = parse_args() else { return Ok(()) };
 
+  let run_coro = |mut vm: Vm| {
+    if let Err(e) = vm.init_fn("main", &[]) {
+      eprintln!("init_fn error: {e:?}");
+    }
+    while match vm.interpret() {
+      Ok(YieldResult::Finished(_)) => false,
+      Ok(YieldResult::Suspend(value)) => {
+        println!("Execution suspended with a yielded value {value}. I'll continue...");
+        true
+      }
+      Err(e) => {
+        eprintln!("Runtime error: {e:?}");
+        false
+      }
+    } {}
+  };
+
   match args.run_mode {
     RunMode::Compile => {
       let writer = std::fs::File::create(&args.output)?;
@@ -1785,10 +1860,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let reader = std::fs::File::open(&code_file)?;
       let mut reader = BufReader::new(reader);
       let bytecode = read_program(&mut reader)?;
-      let mut vm = Vm::new(&bytecode);
-      if let Err(e) = vm.run_fn("main", &[]) {
-        eprintln!("Runtime error: {e:?}");
-      }
+      run_coro(Vm::new(&bytecode));
     }
     RunMode::CompileAndRun => {
       let mut buf = vec![];
@@ -1802,10 +1874,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       }
       let bytecode =
         read_program(&mut std::io::Cursor::new(&mut buf))?;
-      let mut vm = Vm::new(&bytecode);
-      if let Err(e) = vm.run_fn("main", &[]) {
-        eprintln!("Runtime error: {e:?}");
-      }
+      run_coro(Vm::new(&bytecode));
     }
     _ => println!("Please specify -c, -r or -R as an argument"),
   }
@@ -1871,6 +1940,7 @@ enum Statement<'src> {
     stmts: Statements<'src>,
   },
   Return(Expression<'src>),
+  Yield(Expression<'src>),
 }
 
 impl<'src> Statement<'src> {
@@ -1888,6 +1958,7 @@ impl<'src> Statement<'src> {
       }
       Return(ex) => ex.span,
       Break => return None,
+      Yield(ex) => ex.span,
     })
   }
 }
@@ -2256,6 +2327,12 @@ fn break_statement(i: Span) -> IResult<Span, Statement> {
 //   Ok((i, Statement::Continue))
 // }
 
+fn yield_statement(i: Span) -> IResult<Span, Statement> {
+  let (i, _) = space_delimited(tag("yield"))(i)?;
+  let (i, ex) = space_delimited(expr)(i)?;
+  Ok((i, Statement::Yield(ex)))
+}
+
 fn general_statement<'a>(
   last: bool,
 ) -> impl Fn(Span<'a>) -> IResult<Span<'a>, Statement> {
@@ -2276,6 +2353,7 @@ fn general_statement<'a>(
       terminated(return_statement, terminator),
       terminated(break_statement, terminator),
       // terminated(continue_statement, terminator),
+      terminated(yield_statement, terminator),
       terminated(expr_statement, terminator),
     ))(input)
   }
