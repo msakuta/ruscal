@@ -983,6 +983,7 @@ impl ByteCode {
 }
 
 struct StackFrame<'f> {
+  _fn_name: String,
   fn_def: &'f FnByteCode,
   args: usize,
   stack: Vec<Value>,
@@ -990,8 +991,13 @@ struct StackFrame<'f> {
 }
 
 impl<'f> StackFrame<'f> {
-  fn new(fn_def: &'f FnByteCode, args: Vec<Value>) -> Self {
+  fn new(
+    fn_name: String,
+    fn_def: &'f FnByteCode,
+    args: Vec<Value>,
+  ) -> Self {
     Self {
+      _fn_name: fn_name,
       fn_def,
       args: args.len(),
       stack: args,
@@ -1054,9 +1060,11 @@ impl<'code> Vm<'code> {
       FnDef::Native(n) => return Ok((*n.code)(args)),
     };
 
-    self
-      .stack_frames
-      .push(StackFrame::new(fn_def, args.to_vec()));
+    self.stack_frames.push(StackFrame::new(
+      fn_name.to_string(),
+      fn_def,
+      args.to_vec(),
+    ));
 
     self.interpret()
   }
@@ -1064,7 +1072,32 @@ impl<'code> Vm<'code> {
   fn interpret(
     &mut self,
   ) -> Result<Value, Box<dyn std::error::Error>> {
-    while let Some(instruction) = self.top()?.inst() {
+    loop {
+      let instruction =
+        if let Some(instruction) = self.top()?.inst() {
+          instruction
+        } else {
+          let _stack_frames = self.stack_frames.len();
+          let top_frame = self.top_mut()?;
+          let res = top_frame
+            .stack
+            .pop()
+            .ok_or_else(|| "Stack underflow".to_string())?;
+          // println!("End of function {} ip: {}, res: {res}, stack frames: {}", top_frame.fn_name, top_frame.ip, stack_frames);
+          let args = top_frame.args;
+
+          if self.stack_frames.pop().is_none() {
+            return Ok(res);
+          }
+
+          let stack = &mut self.top_mut()?.stack;
+          stack.resize(stack.len() - args - 1, Value::F64(0.));
+          stack.push(res);
+          self.top_mut()?.ip += 1;
+          // println!("Popped fn: {} ip: {}", self.top()?.fn_name, self.top()?.ip);
+          continue;
+        };
+
       match instruction.op {
         OpCode::LoadLiteral => {
           let stack_frame = self.top_mut()?;
@@ -1128,14 +1161,15 @@ impl<'code> Vm<'code> {
             )?;
           match fn_def {
             FnDef::User(user_fn) => {
-              self
-                .stack_frames
-                .push(StackFrame::new(user_fn, args.to_vec()));
+              self.stack_frames.push(StackFrame::new(
+                fname.to_string(),
+                user_fn,
+                args.to_vec(),
+              ));
+              continue;
             }
             FnDef::Native(native) => {
-              let res = (native.code)(
-                &stack[stack.len() - native.args.len()..],
-              );
+              let res = (native.code)(args);
               let stack = &mut self.top_mut()?.stack;
               stack.resize(
                 stack.len() - instruction.arg0 as usize - 1,
@@ -1188,14 +1222,6 @@ impl<'code> Vm<'code> {
       }
       self.top_mut()?.ip += 1;
     }
-
-    Ok(
-      self
-        .top_mut()?
-        .stack
-        .pop()
-        .ok_or_else(|| "Stack underflow".to_string())?,
-    )
   }
 
   fn interpret_bin_op_str(
