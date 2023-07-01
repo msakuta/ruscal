@@ -16,7 +16,7 @@ use nom::{
     alpha1, alphanumeric1, char, multispace0, multispace1,
     none_of,
   },
-  combinator::{opt, recognize},
+  combinator::{cut, map_res, opt, recognize},
   error::ParseError,
   multi::{fold_many0, many0, separated_list0},
   number::complete::recognize_float,
@@ -729,7 +729,7 @@ impl Compiler {
         Statement::Expression(ex) => {
           last_result = Some(self.compile_expr(ex)?);
         }
-        Statement::VarDef(vname, _, ex) => {
+        Statement::VarDef { name, ex, .. } => {
           let mut ex = self.compile_expr(ex)?;
           if matches!(self.target_stack[ex.0], Target::Local(_))
           {
@@ -737,9 +737,9 @@ impl Compiler {
             ex = self.stack_top();
           }
           self.target_stack[ex.0] =
-            Target::Local(vname.to_string());
+            Target::Local(name.to_string());
         }
-        Statement::VarAssign(vname, ex) => {
+        Statement::VarAssign { name, ex, .. } => {
           let stk_ex = self.compile_expr(ex)?;
           let (stk_local, _) = self
             .target_stack
@@ -747,13 +747,13 @@ impl Compiler {
             .enumerate()
             .find(|(_, tgt)| {
               if let Target::Local(tgt) = tgt {
-                tgt == vname.fragment()
+                tgt == name.fragment()
               } else {
                 false
               }
             })
             .ok_or_else(|| {
-              format!("Variable name not found: {vname}")
+              format!("Variable name not found: {name}")
             })?;
           self.add_copy_inst(stk_ex);
           self.add_store_inst(StkIdx(stk_local));
@@ -1641,21 +1641,17 @@ fn type_check<'src>(
   let mut res = TypeDecl::Any;
   for stmt in stmts {
     match stmt {
-      Statement::VarDef(var, type_, init_expr) => {
-        let init_type = tc_expr(init_expr, ctx)?;
+      Statement::VarDef { name, td, ex, .. } => {
+        let init_type = tc_expr(ex, ctx)?;
         let init_type =
-          tc_coerce_type(&init_type, type_, init_expr.span)?;
-        ctx.vars.insert(**var, init_type);
+          tc_coerce_type(&init_type, td, ex.span)?;
+        ctx.vars.insert(**name, init_type);
       }
-      Statement::VarAssign(var, expr) => {
-        let init_type = tc_expr(expr, ctx)?;
+      Statement::VarAssign { name, ex, .. } => {
+        let init_type = tc_expr(ex, ctx)?;
         let target =
-          ctx.vars.get(**var).expect("Variable not found");
-        tc_coerce_type(
-          &init_type,
-          target,
-          calc_offset(*var, expr.span),
-        )?;
+          ctx.vars.get(**name).expect("Variable not found");
+        tc_coerce_type(&init_type, target, ex.span)?;
       }
       Statement::FnDef {
         name,
@@ -1824,8 +1820,17 @@ impl<'a> Expression<'a> {
 #[derive(Debug, PartialEq, Clone)]
 enum Statement<'src> {
   Expression(Expression<'src>),
-  VarDef(Span<'src>, TypeDecl, Expression<'src>),
-  VarAssign(Span<'src>, Expression<'src>),
+  VarDef {
+    span: Span<'src>,
+    name: Span<'src>,
+    td: TypeDecl,
+    ex: Expression<'src>,
+  },
+  VarAssign {
+    span: Span<'src>,
+    name: Span<'src>,
+    ex: Expression<'src>,
+  },
   For {
     loop_var: Span<'src>,
     start: Expression<'src>,
@@ -1847,8 +1852,8 @@ impl<'src> Statement<'src> {
     use Statement::*;
     Some(match self {
       Expression(ex) => ex.span,
-      VarDef(name, _, ex) => calc_offset(*name, ex.span),
-      VarAssign(name, ex) => calc_offset(*name, ex.span),
+      VarDef { span, .. } => *span,
+      VarAssign { span, .. } => *span,
       For {
         loop_var, stmts, ..
       } => calc_offset(*loop_var, stmts.span()),
@@ -2062,7 +2067,15 @@ fn if_expr(i0: Span) -> IResult<Span, Expression> {
     delimited(open_brace, statements, close_brace)(i)?;
   let (i, f_case) = opt(preceded(
     space_delimited(tag("else")),
-    delimited(open_brace, statements, close_brace),
+    alt((
+      delimited(open_brace, statements, close_brace),
+      map_res(
+        if_expr,
+        |v| -> Result<Vec<Statement>, nom::error::Error<&str>> {
+          Ok(vec![Statement::Expression(v)])
+        },
+      ),
+    )),
   ))(i)?;
 
   Ok((
@@ -2083,22 +2096,43 @@ fn expr(i: Span) -> IResult<Span, Expression> {
 }
 
 fn var_def(i: Span) -> IResult<Span, Statement> {
+  let span = i;
   let (i, _) =
     delimited(multispace0, tag("var"), multispace1)(i)?;
-  let (i, name) = space_delimited(identifier)(i)?;
-  let (i, _) = space_delimited(char(':'))(i)?;
-  let (i, td) = type_decl(i)?;
-  let (i, _) = space_delimited(char('='))(i)?;
-  let (i, expr) = space_delimited(expr)(i)?;
-  let (i, _) = space_delimited(char(';'))(i)?;
-  Ok((i, Statement::VarDef(name, td, expr)))
+  let (i, (name, td, ex)) = cut(|i| {
+    let (i, name) = space_delimited(identifier)(i)?;
+    let (i, _) = space_delimited(char(':'))(i)?;
+    let (i, td) = type_decl(i)?;
+    let (i, _) = space_delimited(char('='))(i)?;
+    let (i, ex) = space_delimited(expr)(i)?;
+    let (i, _) = space_delimited(char(';'))(i)?;
+    Ok((i, (name, td, ex)))
+  })(i)?;
+  Ok((
+    i,
+    Statement::VarDef {
+      span: calc_offset(span, i),
+      name,
+      td,
+      ex,
+    },
+  ))
 }
 
 fn var_assign(i: Span) -> IResult<Span, Statement> {
+  let span = i;
   let (i, name) = space_delimited(identifier)(i)?;
   let (i, _) = space_delimited(char('='))(i)?;
-  let (i, expr) = space_delimited(expr)(i)?;
-  Ok((i, Statement::VarAssign(name, expr)))
+  let (i, ex) = space_delimited(expr)(i)?;
+  let (i, _) = space_delimited(char(';'))(i)?;
+  Ok((
+    i,
+    Statement::VarAssign {
+      span: calc_offset(span, i),
+      name,
+      ex,
+    },
+  ))
 }
 
 fn expr_statement(i: Span) -> IResult<Span, Statement> {
@@ -2108,13 +2142,16 @@ fn expr_statement(i: Span) -> IResult<Span, Statement> {
 
 fn for_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("for"))(i)?;
-  let (i, loop_var) = space_delimited(identifier)(i)?;
-  let (i, _) = space_delimited(tag("in"))(i)?;
-  let (i, start) = space_delimited(expr)(i)?;
-  let (i, _) = space_delimited(tag("to"))(i)?;
-  let (i, end) = space_delimited(expr)(i)?;
-  let (i, stmts) =
-    delimited(open_brace, statements, close_brace)(i)?;
+  let (i, (loop_var, start, end, stmts)) = cut(|i| {
+    let (i, loop_var) = space_delimited(identifier)(i)?;
+    let (i, _) = space_delimited(tag("in"))(i)?;
+    let (i, start) = space_delimited(expr)(i)?;
+    let (i, _) = space_delimited(tag("to"))(i)?;
+    let (i, end) = space_delimited(expr)(i)?;
+    let (i, stmts) =
+      delimited(open_brace, statements, close_brace)(i)?;
+    Ok((i, (loop_var, start, end, stmts)))
+  })(i)?;
   Ok((
     i,
     Statement::For {
@@ -2154,15 +2191,18 @@ fn argument(i: Span) -> IResult<Span, (Span, TypeDecl)> {
 
 fn fn_def_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("fn"))(i)?;
-  let (i, name) = space_delimited(identifier)(i)?;
-  let (i, _) = space_delimited(tag("("))(i)?;
-  let (i, args) =
-    separated_list0(char(','), space_delimited(argument))(i)?;
-  let (i, _) = space_delimited(tag(")"))(i)?;
-  let (i, _) = space_delimited(tag("->"))(i)?;
-  let (i, ret_type) = type_decl(i)?;
-  let (i, stmts) =
-    delimited(open_brace, statements, close_brace)(i)?;
+  let (i, (name, args, ret_type, stmts)) = cut(|i| {
+    let (i, name) = space_delimited(identifier)(i)?;
+    let (i, _) = space_delimited(tag("("))(i)?;
+    let (i, args) =
+      separated_list0(char(','), space_delimited(argument))(i)?;
+    let (i, _) = space_delimited(tag(")"))(i)?;
+    let (i, _) = space_delimited(tag("->"))(i)?;
+    let (i, ret_type) = type_decl(i)?;
+    let (i, stmts) =
+      delimited(open_brace, statements, close_brace)(i)?;
+    Ok((i, (name, args, ret_type, stmts)))
+  })(i)?;
   Ok((
     i,
     Statement::FnDef {
