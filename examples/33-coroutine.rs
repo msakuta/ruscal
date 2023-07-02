@@ -732,7 +732,6 @@ impl Compiler {
       }
       ExprEnum::Await(ex) => {
         let res = self.compile_expr(ex)?;
-        println!("await res: {res:?}");
         self.add_copy_inst(res);
         self.add_inst(OpCode::Await, 0);
         self.stack_top()
@@ -1082,7 +1081,6 @@ impl StackFrame {
   }
 }
 
-// #[derive(Debug)]
 struct Vm {
   bytecode: Rc<ByteCode>,
   stack_frames: Vec<StackFrame>,
