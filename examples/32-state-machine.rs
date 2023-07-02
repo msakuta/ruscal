@@ -2320,7 +2320,7 @@ fn break_statement(i: Span) -> IResult<Span, Statement> {
 
 fn yield_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("yield"))(i)?;
-  let (i, ex) = space_delimited(expr)(i)?;
+  let (i, ex) = cut(space_delimited(expr))(i)?;
   Ok((i, Statement::Yield(ex)))
 }
 
