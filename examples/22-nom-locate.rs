@@ -1,5 +1,6 @@
 use std::{collections::HashMap, io::Read, ops::ControlFlow};
 
+use ::rusty_programmer::parse_args;
 use nom::{
   branch::alt,
   bytes::complete::tag,
@@ -16,32 +17,35 @@ use nom::{
 };
 use nom_locate::LocatedSpan;
 
-fn main() {
-  let mut buf = String::new();
-  if !std::io::stdin().read_to_string(&mut buf).is_ok() {
-    panic!("Failed to read from stdin");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let Some(args) = parse_args(false) else { return Ok(()) };
+
+  let src = args.source.as_ref().ok_or_else(|| {
+    "Please specify source file to compile after -c"
+  })?;
+  let source = std::fs::read_to_string(src)?;
+
+  let parsed_statements = statements_finish(Span::new(&source))
+    .map_err(|e| format!("Parse error: {e:?}"))?;
+
+  if args.show_ast {
+    println!("AST: {parsed_statements:#?}");
   }
-  let parsed_statements =
-    match statements_finish(Span::new(&buf)) {
-      Ok(parsed_statements) => parsed_statements,
-      Err(e) => {
-        eprintln!("Parse error: {e:?}");
-        return;
-      }
-    };
 
   let mut tc_ctx = TypeCheckContext::new();
 
   if let Err(err) = type_check(&parsed_statements, &mut tc_ctx)
   {
     println!("Type check error: {err}");
-    return;
+    return Ok(());
   }
   println!("Type check OK");
 
   let mut frame = StackFrame::new();
 
   eval_stmts(&parsed_statements, &mut frame);
+
+  Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]

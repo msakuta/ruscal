@@ -1645,7 +1645,7 @@ struct NativeFn<'src> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let Some(args) = parse_args() else { return Ok(()) };
+  let Some(args) = parse_args(true) else { return Ok(()) };
 
   match args.run_mode {
     RunMode::Compile => {

@@ -17,7 +17,7 @@ pub struct Args {
 
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
 
-pub fn parse_args() -> Option<Args> {
+pub fn parse_args(compilable: bool) -> Option<Args> {
   let mut run_mode = RunMode::None;
   let mut source = None;
   let mut output = None;
@@ -60,17 +60,23 @@ pub fn parse_args() -> Option<Args> {
   }
 
   if show_help || args_is_empty {
+    let compiler_options = if compilable {
+      r#"    -c       Compile source file to a bytecode
+    -o file  Specify output file
+    -r       Run bytecode
+    -R       Compile and run
+    -d       Disassemble compiled code"#
+    } else {
+      ""
+    };
     println!(
       r#"Usage: {} [options] [source.txt]
 
 Options:
-    -c       Compile source file to a bytecode
-    -o file  Specify output file
-    -r       Run bytecode
-    -R       Compile and run
-    -d       Disassemble compiled code
+{compiler_options}
     -a       Show AST
-    -h       Display help"#,
+    -h       Display help
+"#,
       exe.unwrap_or_else(|| "29-full-stmt".to_string())
     );
     return None;

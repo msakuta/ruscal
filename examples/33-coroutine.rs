@@ -1931,7 +1931,7 @@ struct NativeFn<'src> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let Some(args) = parse_args() else { return Ok(()) };
+  let Some(args) = parse_args(true) else { return Ok(()) };
 
   let run_coro = |mut vm: Vm| {
     if let Err(e) = vm.init_fn("main", &[]) {
