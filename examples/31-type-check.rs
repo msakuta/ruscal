@@ -765,6 +765,7 @@ impl Compiler {
           start,
           end,
           stmts,
+          ..
         } => {
           let stk_start = self.compile_expr(start)?;
           let stk_end = self.compile_expr(end)?;
@@ -1581,6 +1582,7 @@ fn type_check<'src>(
         start,
         end,
         stmts,
+        ..
       } => {
         tc_coerce_type(
           &tc_expr(start, ctx)?,
@@ -1729,12 +1731,12 @@ enum Statement<'src> {
     ex: Expression<'src>,
   },
   For {
+    span: Span<'src>,
     loop_var: Span<'src>,
     start: Expression<'src>,
     end: Expression<'src>,
     stmts: Statements<'src>,
   },
-  Break,
   FnDef {
     name: Span<'src>,
     args: Vec<(Span<'src>, TypeDecl)>,
@@ -1742,6 +1744,8 @@ enum Statement<'src> {
     stmts: Statements<'src>,
   },
   Return(Expression<'src>),
+  Break,
+  // Continue,
 }
 
 impl<'src> Statement<'src> {
@@ -1751,9 +1755,7 @@ impl<'src> Statement<'src> {
       Expression(ex) => ex.span,
       VarDef { span, .. } => *span,
       VarAssign { span, .. } => *span,
-      For {
-        loop_var, stmts, ..
-      } => calc_offset(*loop_var, stmts.span()),
+      For { span, .. } => *span,
       FnDef { name, stmts, .. } => {
         calc_offset(*name, stmts.span())
       }
@@ -2038,6 +2040,7 @@ fn expr_statement(i: Span) -> IResult<Span, Statement> {
 }
 
 fn for_statement(i: Span) -> IResult<Span, Statement> {
+  let i0 = i;
   let (i, _) = space_delimited(tag("for"))(i)?;
   let (i, (loop_var, start, end, stmts)) = cut(|i| {
     let (i, loop_var) = space_delimited(identifier)(i)?;
@@ -2052,6 +2055,7 @@ fn for_statement(i: Span) -> IResult<Span, Statement> {
   Ok((
     i,
     Statement::For {
+      span: calc_offset(i0, i),
       loop_var,
       start,
       end,
