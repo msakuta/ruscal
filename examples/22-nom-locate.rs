@@ -2,7 +2,7 @@ use std::{
   cmp::Ordering, collections::HashMap, ops::ControlFlow,
 };
 
-use ::rusty_programmer::parse_args;
+use ::rusty_programmer::{parse_args, RunMode};
 use nom::{
   branch::alt,
   bytes::complete::tag,
@@ -47,9 +47,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   }
   println!("Type check OK");
 
-  let mut frame = StackFrame::new();
+  if !matches!(args.run_mode, RunMode::TypeCheck) {
+    let mut frame = StackFrame::new();
 
-  eval_stmts(&parsed_statements, &mut frame);
+    eval_stmts(&parsed_statements, &mut frame);
+  }
 
   Ok(())
 }

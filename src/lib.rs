@@ -2,6 +2,7 @@ use std::sync::atomic::AtomicBool;
 
 pub enum RunMode {
   None,
+  TypeCheck,
   Compile,
   Run(String),
   CompileAndRun,
@@ -43,6 +44,7 @@ pub fn parse_args(compilable: bool) -> Option<Args> {
       "-R" => run_mode = RunMode::CompileAndRun,
       "-d" => disasm = true,
       "-a" => show_ast = true,
+      "-t" => run_mode = RunMode::TypeCheck,
       "-D" => {
         DEBUG.store(true, std::sync::atomic::Ordering::Relaxed)
       }
@@ -75,6 +77,7 @@ pub fn parse_args(compilable: bool) -> Option<Args> {
 Options:
 {compiler_options}
     -a       Show AST
+    -t       Typecheck only, no execution of the code
     -h       Display help
 "#,
       exe.unwrap_or_else(|| "29-full-stmt".to_string())

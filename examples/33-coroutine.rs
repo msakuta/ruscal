@@ -939,8 +939,7 @@ fn write_program(
   source: &str,
   writer: &mut impl Write,
   out_file: &str,
-  disasm: bool,
-  show_ast: bool,
+  args: &Args,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let mut compiler = Compiler::new();
   let stmts =
@@ -954,7 +953,7 @@ fn write_program(
       )
     })?;
 
-  if show_ast {
+  if args.show_ast {
     println!("AST: {stmts:#?}");
   }
 
@@ -974,9 +973,13 @@ fn write_program(
     }
   }
 
+  if matches!(args.run_mode, RunMode::TypeCheck) {
+    return Ok(());
+  }
+
   compiler.compile(&stmts)?;
 
-  if disasm {
+  if args.disasm {
     compiler.disasm(&mut std::io::stdout())?;
   }
 
@@ -1450,14 +1453,7 @@ fn compile(
     ))
   })?;
   let source = std::fs::read_to_string(src)?;
-  write_program(
-    src,
-    &source,
-    writer,
-    out_file,
-    args.disasm,
-    args.show_ast,
-  )
+  write_program(src, &source, writer, out_file, args)
 }
 
 fn read_program(
@@ -1951,6 +1947,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   };
 
   match args.run_mode {
+    RunMode::TypeCheck => {
+      if let Err(e) =
+        compile(&mut std::io::sink(), &args, &args.output)
+      {
+        eprintln!("TypeCheck error: {e}");
+      }
+    }
     RunMode::Compile => {
       let writer = std::fs::File::create(&args.output)?;
       let mut writer = BufWriter::new(writer);
