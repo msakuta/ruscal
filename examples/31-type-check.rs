@@ -1648,6 +1648,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   let Some(args) = parse_args(true) else { return Ok(()) };
 
   match args.run_mode {
+    RunMode::TypeCheck => {
+      if let Err(e) =
+        compile(&mut std::io::sink(), &args, &args.output)
+      {
+        eprintln!("TypeCheck error: {e}");
+      }
+    }
     RunMode::Compile => {
       let writer = std::fs::File::create(&args.output)?;
       let mut writer = BufWriter::new(writer);
@@ -1680,7 +1687,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Runtime error: {e:?}");
       }
     }
-    _ => println!("Please specify -c, -r or -R as an argument"),
+    _ => {
+      println!("Please specify -c, -r, -t or -R as an argument")
+    }
   }
   Ok(())
 }

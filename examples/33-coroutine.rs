@@ -1983,7 +1983,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       )?);
       run_coro(Vm::new(bytecode));
     }
-    _ => println!("Please specify -c, -r or -R as an argument"),
+    _ => {
+      println!("Please specify -c, -r, -t or -R as an argument")
+    }
   }
   Ok(())
 }
