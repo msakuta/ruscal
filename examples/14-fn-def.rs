@@ -177,6 +177,8 @@ enum Expression<'src> {
   Sub(Box<Expression<'src>>, Box<Expression<'src>>),
   Mul(Box<Expression<'src>>, Box<Expression<'src>>),
   Div(Box<Expression<'src>>, Box<Expression<'src>>),
+  Gt(Box<Expression<'src>>, Box<Expression<'src>>),
+  Lt(Box<Expression<'src>>, Box<Expression<'src>>),
   If(
     Box<Expression<'src>>,
     Box<Expression<'src>>,
@@ -251,6 +253,20 @@ fn eval(expr: &Expression, frame: &StackFrame) -> f64 {
     Sub(lhs, rhs) => eval(lhs, frame) - eval(rhs, frame),
     Mul(lhs, rhs) => eval(lhs, frame) * eval(rhs, frame),
     Div(lhs, rhs) => eval(lhs, frame) / eval(rhs, frame),
+    Gt(lhs, rhs) => {
+      if eval(lhs, frame) > eval(rhs, frame) {
+        1.
+      } else {
+        0.
+      }
+    }
+    Lt(lhs, rhs) => {
+      if eval(lhs, frame) < eval(rhs, frame) {
+        1.
+      } else {
+        0.
+      }
+    }
     If(cond, t_case, f_case) => {
       if eval(cond, frame) != 0. {
         eval(t_case, frame)
@@ -355,6 +371,21 @@ fn num_expr(i: &str) -> IResult<&str, Expression> {
   )(i)
 }
 
+fn cond_expr(i: &str) -> IResult<&str, Expression> {
+  let (i, first) = num_expr(i)?;
+  let (i, cond) =
+    space_delimited(alt((char('<'), char('>'))))(i)?;
+  let (i, second) = num_expr(i)?;
+  Ok((
+    i,
+    match cond {
+      '<' => Expression::Lt(Box::new(first), Box::new(second)),
+      '>' => Expression::Gt(Box::new(first), Box::new(second)),
+      _ => unreachable!(),
+    },
+  ))
+}
+
 fn open_brace(i: &str) -> IResult<&str, ()> {
   let (i, _) = space_delimited(char('{'))(i)?;
   Ok((i, ()))
@@ -386,7 +417,7 @@ fn if_expr(i: &str) -> IResult<&str, Expression> {
 }
 
 fn expr(i: &str) -> IResult<&str, Expression> {
-  alt((if_expr, num_expr))(i)
+  alt((if_expr, cond_expr, num_expr))(i)
 }
 
 fn var_def(i: &str) -> IResult<&str, Statement> {
