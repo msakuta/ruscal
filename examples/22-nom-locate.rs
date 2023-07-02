@@ -27,8 +27,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   })?;
   let source = std::fs::read_to_string(src_file)?;
 
-  let parsed_statements = statements_finish(Span::new(&source))
-    .map_err(|e| format!("Parse error: {e:?}"))?;
+  let parsed_statements =
+    match statements_finish(Span::new(&source)) {
+      Ok(stmts) => stmts,
+      Err(err) => {
+        eprintln!(
+          "Parse error: {src_file}:{}:{}: {err}",
+          err.input.location_line(),
+          err.input.get_column()
+        );
+        return Ok(());
+      }
+    };
 
   if args.show_ast {
     println!("AST: {parsed_statements:#?}");
