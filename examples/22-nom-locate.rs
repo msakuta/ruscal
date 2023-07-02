@@ -1,4 +1,6 @@
-use std::{collections::HashMap, io::Read, ops::ControlFlow};
+use std::{
+  cmp::Ordering, collections::HashMap, ops::ControlFlow,
+};
 
 use ::rusty_programmer::parse_args;
 use nom::{
@@ -20,10 +22,10 @@ use nom_locate::LocatedSpan;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let Some(args) = parse_args(false) else { return Ok(()) };
 
-  let src = args.source.as_ref().ok_or_else(|| {
+  let src_file = args.source.as_ref().ok_or_else(|| {
     "Please specify source file to compile after -c"
   })?;
-  let source = std::fs::read_to_string(src)?;
+  let source = std::fs::read_to_string(src_file)?;
 
   let parsed_statements = statements_finish(Span::new(&source))
     .map_err(|e| format!("Parse error: {e:?}"))?;
@@ -36,7 +38,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
   if let Err(err) = type_check(&parsed_statements, &mut tc_ctx)
   {
-    println!("Type check error: {err}");
+    println!(
+      "Type check error: {src_file}:{}:{}: {err}",
+      err.span.location_line(),
+      err.span.get_column()
+    );
     return Ok(());
   }
   println!("Type check OK");
@@ -48,7 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
   Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 enum Value {
   F64(f64),
   I64(i64),
@@ -64,6 +70,20 @@ impl std::fmt::Display for Value {
       Self::F64(v) => write!(f, "{v}"),
       Self::I64(v) => write!(f, "{v}"),
       Self::Str(v) => write!(f, "{v}"),
+    }
+  }
+}
+
+impl PartialOrd for Value {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    use Value::*;
+    match (self, other) {
+      (F64(lhs), F64(rhs)) => lhs.partial_cmp(rhs),
+      (I64(lhs), I64(rhs)) => lhs.partial_cmp(rhs),
+      (F64(lhs), I64(rhs)) => lhs.partial_cmp(&(*rhs as f64)),
+      (I64(lhs), F64(rhs)) => (*lhs as f64).partial_cmp(rhs),
+      (Str(lhs), Str(rhs)) => lhs.partial_cmp(rhs),
+      _ => None,
     }
   }
 }
@@ -358,7 +378,7 @@ fn tc_expr<'src>(
     StrLiteral(_val) => TypeDecl::Str,
     Ident(str) => ctx.get_var(str).ok_or_else(|| {
       TypeCheckError::new(
-        format!("Variable {:?} not found in scope", str),
+        format!("Variable \"{}\" not found in scope", str),
         e.span,
       )
     })?,
