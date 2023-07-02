@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{collections::HashMap, io::Read, ops::ControlFlow};
+use std::{collections::HashMap, io::Read, ops::ControlFlow, cmp::Ordering};
 
 use nom::{
   branch::alt,
@@ -35,7 +35,7 @@ fn main() {
   eval_stmts(&parsed_statements, &mut frame);
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq)]
 enum Value {
   F64(f64),
   I64(i64),
@@ -51,6 +51,20 @@ impl std::fmt::Display for Value {
       Self::F64(v) => write!(f, "{v}"),
       Self::I64(v) => write!(f, "{v}"),
       Self::Str(v) => write!(f, "{v}"),
+    }
+  }
+}
+
+impl PartialOrd for Value {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    use Value::*;
+    match (self, other) {
+      (F64(lhs), F64(rhs)) => lhs.partial_cmp(rhs),
+      (I64(lhs), I64(rhs)) => lhs.partial_cmp(rhs),
+      (F64(lhs), I64(rhs)) => lhs.partial_cmp(&(*rhs as f64)),
+      (I64(lhs), F64(rhs)) => (*lhs as f64).partial_cmp(rhs),
+      (Str(lhs), Str(rhs)) => lhs.partial_cmp(rhs),
+      _ => None,
     }
   }
 }
