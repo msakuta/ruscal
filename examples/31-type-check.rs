@@ -734,8 +734,7 @@ impl Compiler {
         }
         Statement::VarDef { name, ex, .. } => {
           let mut ex = self.compile_expr(ex)?;
-          if matches!(self.target_stack[ex.0], Target::Local(_))
-          {
+          if !matches!(self.target_stack[ex.0], Target::Temp) {
             self.add_copy_inst(ex);
             ex = self.stack_top();
           }
