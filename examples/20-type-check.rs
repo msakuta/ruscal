@@ -1,8 +1,8 @@
 use std::{
-  cmp::Ordering, collections::HashMap, io::Read,
-  ops::ControlFlow,
+  cmp::Ordering, collections::HashMap, ops::ControlFlow,
 };
 
+use ::rusty_programmer::{parse_args, RunMode};
 use nom::{
   branch::alt,
   bytes::complete::tag,
@@ -18,31 +18,41 @@ use nom::{
   Finish, IResult, Parser,
 };
 
-fn main() {
-  let mut buf = String::new();
-  if !std::io::stdin().read_to_string(&mut buf).is_ok() {
-    panic!("Failed to read from stdin");
-  }
-  let parsed_statements = match statements_finish(&buf) {
-    Ok(parsed_statements) => parsed_statements,
-    Err(e) => {
-      eprintln!("Parse error: {e:?}");
-      return;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+  let Some(args) = parse_args(false) else { return Ok(()) };
+
+  let src_file = args.source.as_ref().ok_or_else(|| {
+    "Please specify source file to compile after -c"
+  })?;
+  let source = std::fs::read_to_string(src_file)?;
+
+  let parsed_statements = match statements_finish(&source) {
+    Ok(stmts) => stmts,
+    Err(err) => {
+      eprintln!("Parse error: {src_file}: {err}",);
+      return Ok(());
     }
   };
+
+  if args.show_ast {
+    println!("AST: {parsed_statements:#?}");
+  }
 
   let mut tc_ctx = TypeCheckContext::new();
 
   if let Err(err) = type_check(&parsed_statements, &mut tc_ctx)
   {
     println!("Type check error: {err}");
-    return;
+    return Ok(());
   }
   println!("Type check OK");
 
-  let mut frame = StackFrame::new();
+  if !matches!(args.run_mode, RunMode::TypeCheck) {
+    let mut frame = StackFrame::new();
 
-  eval_stmts(&parsed_statements, &mut frame);
+    eval_stmts(&parsed_statements, &mut frame);
+  }
+  Ok(())
 }
 
 #[derive(Debug, Clone, PartialEq)]
