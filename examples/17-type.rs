@@ -1,4 +1,7 @@
-use std::{collections::HashMap, io::Read, ops::ControlFlow};
+use std::{
+  cmp::Ordering, collections::HashMap, io::Read,
+  ops::ControlFlow,
+};
 
 use nom::{
   branch::alt,
@@ -28,8 +31,6 @@ fn main() {
     }
   };
 
-  dbg!(&parsed_statements);
-
   let mut frame = StackFrame::new();
 
   eval_stmts(&parsed_statements, &mut frame);
@@ -56,10 +57,7 @@ impl std::fmt::Display for Value {
 }
 
 impl PartialOrd for Value {
-  fn partial_cmp(
-    &self,
-    other: &Self,
-  ) -> Option<std::cmp::Ordering> {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
     use Value::*;
     match (self, other) {
       (F64(lhs), F64(rhs)) => lhs.partial_cmp(rhs),
@@ -509,9 +507,11 @@ fn eval<'src>(
   use Expression::*;
   let res = match expr {
     Ident("pi") => Value::F64(std::f64::consts::PI),
-    Ident(id) => {
-      frame.vars.get(*id).cloned().expect("Variable not found")
-    }
+    Ident(id) => frame
+      .vars
+      .get(*id)
+      .cloned()
+      .expect(&format!("Variable not found: {id}")),
     NumLiteral(n) => Value::F64(*n),
     StrLiteral(s) => Value::Str(s.clone()),
     FnInvoke(name, args) => {

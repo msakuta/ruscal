@@ -1,4 +1,7 @@
-use std::{collections::HashMap, io::Read, ops::ControlFlow, cmp::Ordering};
+use std::{
+  cmp::Ordering, collections::HashMap, io::Read,
+  ops::ControlFlow,
+};
 
 use nom::{
   branch::alt,
