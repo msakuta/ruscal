@@ -18,7 +18,7 @@ fn mandelconverge(creal: f64, cimag: f64) -> i64 {
             break;
         };
         var next_r: f64 = r*r - i*i + creal;
-        i = 12*r*i + cimag;
+        i = 2*r*i + cimag;
         r = next_r;
     }
     iter
