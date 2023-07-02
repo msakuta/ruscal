@@ -332,6 +332,12 @@ impl Compiler {
     inst
   }
 
+  fn add_load_literal_inst(&mut self, lit: u8) -> InstPtr {
+    let inst = self.add_inst(OpCode::LoadLiteral, lit);
+    self.target_stack.push(Target::Literal(lit as usize));
+    inst
+  }
+
   fn add_binop_inst(&mut self, op: OpCode) -> InstPtr {
     self.target_stack.pop();
     self.add_inst(op, 0)
@@ -403,8 +409,7 @@ impl Compiler {
     Ok(match ex {
       Expression::NumLiteral(num) => {
         let id = self.add_literal(Value::F64(*num));
-        self.add_inst(OpCode::LoadLiteral, id);
-        self.target_stack.push(Target::Literal(id as usize));
+        self.add_load_literal_inst(id);
         self.stack_top()
       }
       Expression::Ident(ident) => {
@@ -454,8 +459,7 @@ impl Compiler {
           .collect::<Result<Vec<_>, _>>()?;
 
         let stack_before_call = self.target_stack.len();
-        self.add_inst(OpCode::LoadLiteral, name);
-        self.target_stack.push(Target::Literal(name as usize));
+        self.add_load_literal_inst(name);
         for arg in &args {
           self.add_copy_inst(*arg);
         }
@@ -587,8 +591,7 @@ impl Compiler {
           let one = self.add_literal(Value::F64(1.));
           dprintln!("end in loop: {:?}", self.target_stack);
           self.add_copy_inst(stk_loop_var);
-          self.add_inst(OpCode::LoadLiteral, one);
-          self.target_stack.push(Target::Literal(one as usize));
+          self.add_load_literal_inst(one);
           self.add_inst(OpCode::Add, 0);
           self.target_stack.pop();
           self.add_store_inst(stk_loop_var);
@@ -624,7 +627,7 @@ impl Compiler {
   ) -> Result<StkIdx, Box<dyn Error>> {
     Ok(self.compile_stmts(stmts)?.unwrap_or_else(|| {
       let id = self.add_literal(Value::F64(0.));
-      self.add_inst(OpCode::LoadLiteral, id as u8);
+      self.add_load_literal_inst(id);
       self.stack_top()
     }))
   }
