@@ -1405,6 +1405,13 @@ impl Vm {
       None
     })
   }
+
+  fn back_trace(&self) {
+    for (i, frame) in self.stack_frames.iter().rev().enumerate()
+    {
+      println!("[{}]: {:?}", i, frame.stack);
+    }
+  }
 }
 
 fn unary_fn<'a>(f: fn(f64) -> f64) -> FnDecl<'a> {
@@ -1926,6 +1933,26 @@ struct NativeFn<'src> {
   code: Box<dyn Fn(&[Value]) -> Value>,
 }
 
+fn debugger(vm: &Vm) -> bool {
+  println!("[c]ontinue/[p]rint/[e]xit/[bt]race?");
+  loop {
+    let mut buffer = String::new();
+    if std::io::stdin().read_line(&mut buffer).is_ok() {
+      match buffer.trim() {
+        "c" => return false,
+        "p" => {
+          println!("Stack: {:?}", vm.top().unwrap().stack);
+        }
+        "e" => return true,
+        "bt" => vm.back_trace(),
+        _ => println!(
+          "Please say [c]ontinue/[p]rint/[b]reak/[bt]race"
+        ),
+      }
+    }
+  }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
   let Some(args) = parse_args(true) else { return Ok(()) };
 
@@ -1933,17 +1960,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Err(e) = vm.init_fn("main", &[]) {
       eprintln!("init_fn error: {e:?}");
     }
-    while match vm.interpret() {
-      Ok(YieldResult::Finished(_)) => false,
-      Ok(YieldResult::Suspend(value)) => {
-        println!("Execution suspended with a yielded value {value}. I'll continue...");
-        true
+    loop {
+      match vm.interpret() {
+        Ok(YieldResult::Finished(_)) => break,
+        Ok(YieldResult::Suspend(value)) => {
+          println!(
+            "Execution suspended with a yielded value {value}"
+          );
+          if value == Value::Str("break".to_string()) {
+            if debugger(&vm) {
+              break;
+            }
+          }
+        }
+        Err(e) => {
+          eprintln!("Runtime error: {e:?}");
+          break;
+        }
       }
-      Err(e) => {
-        eprintln!("Runtime error: {e:?}");
-        false
-      }
-    } {}
+    }
   };
 
   match args.run_mode {

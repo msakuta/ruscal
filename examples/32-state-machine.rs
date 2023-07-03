@@ -1840,7 +1840,9 @@ fn debugger(vm: &Vm) -> bool {
         }
         "e" => return true,
         "bt" => vm.back_trace(),
-        _ => println!("Please say [c]ontinue/[p]rint/[b]reak"),
+        _ => println!(
+          "Please say [c]ontinue/[p]rint/[b]reak/[bt]race"
+        ),
       }
     }
   }
