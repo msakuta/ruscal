@@ -1739,7 +1739,7 @@ fn tc_expr<'src>(
     StrLiteral(_val) => TypeDecl::Str,
     Ident(str) => ctx.get_var(str).ok_or_else(|| {
       TypeCheckError::new(
-        format!("Variable {:?} not found in scope", str),
+        format!("Variable \"{}\" not found in scope", str),
         e.span,
       )
     })?,
