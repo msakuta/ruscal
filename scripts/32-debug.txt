@@ -1,0 +1,10 @@
+
+fn square(i: i64) -> i64 {
+    var value: i64 = i * i;
+    yield "break";
+    print(value);
+}
+
+for i in 1 to 5 {
+    square(i);
+}
