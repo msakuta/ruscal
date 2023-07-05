@@ -3,7 +3,7 @@ use std::{
   io::{BufReader, BufWriter, Read, Write},
 };
 
-use ::rusty_programmer::{dprintln, parse_args, RunMode};
+use ::ruscal::{dprintln, parse_args, RunMode};
 
 use nom::{
   branch::alt,

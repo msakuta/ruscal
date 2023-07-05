@@ -4,8 +4,8 @@ use std::{
   io::{BufReader, BufWriter, Read, Write},
 };
 
-use ::rusty_programmer::{dprintln, parse_args, RunMode};
-use rusty_programmer::Args;
+use ::ruscal::{dprintln, parse_args, RunMode};
+use ruscal::Args;
 
 use nom::{
   branch::alt,

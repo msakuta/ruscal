@@ -7,9 +7,9 @@ use std::{
   rc::Rc,
 };
 
-use ::rusty_programmer::{dprintln, parse_args, RunMode};
+use ::ruscal::{dprintln, parse_args, RunMode};
 use nom_locate::LocatedSpan;
-use rusty_programmer::Args;
+use ruscal::Args;
 
 use nom::{
   branch::alt,

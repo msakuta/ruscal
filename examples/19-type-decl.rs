@@ -4,7 +4,7 @@ use std::{
   cmp::Ordering, collections::HashMap, ops::ControlFlow,
 };
 
-use ::rusty_programmer::parse_args;
+use ::ruscal::parse_args;
 use nom::{
   branch::alt,
   bytes::complete::tag,

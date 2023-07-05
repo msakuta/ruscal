@@ -12,7 +12,7 @@ use nom::{
   sequence::{delimited, pair},
   IResult,
 };
-use rusty_programmer::{dprintln, parse_args, RunMode};
+use ruscal::{dprintln, parse_args, RunMode};
 
 #[derive(Debug, Clone, Copy)]
 #[repr(u8)]

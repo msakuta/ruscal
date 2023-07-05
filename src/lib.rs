@@ -98,12 +98,12 @@ Options:
 #[macro_export]
 macro_rules! dprintln {
     ($fmt:literal) => {
-        if ::rusty_programmer::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        if ::ruscal::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
             println!($fmt);
         }
     };
     ($fmt:literal, $($args:expr),*) => {
-        if ::rusty_programmer::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        if ::ruscal::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
             println!($fmt, $($args),*);
         }
     };
