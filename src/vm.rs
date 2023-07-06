@@ -267,7 +267,7 @@ impl Vm {
         OpCode::Jf => {
           let stack = &mut self.top_mut()?.stack;
           let cond = stack.pop().expect("Jf needs an argument");
-          if cond.coerce_f64() == 0. {
+          if cond.coerce_f64() == Ok(0.) {
             self.top_mut()?.ip = instruction.arg0 as usize;
             continue;
           }

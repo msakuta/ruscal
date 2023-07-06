@@ -123,38 +123,44 @@ impl Value {
     }
   }
 
-  pub(crate) fn coerce_f64(&self) -> f64 {
-    match self {
+  pub fn coerce_f64(&self) -> Result<f64, String> {
+    Ok(match self {
       Self::F64(value) => *value,
       Self::I64(value) => *value as f64,
-      _ => panic!(
-        "Coercion failed: {:?} cannot be coerced to f64",
-        self
-      ),
-    }
+      _ => {
+        return Err(format!(
+          "Coercion failed: {:?} cannot be coerced to f64",
+          self
+        ))
+      }
+    })
   }
 
-  pub(crate) fn coerce_i64(&self) -> i64 {
-    match self {
+  pub fn coerce_i64(&self) -> Result<i64, String> {
+    Ok(match self {
       Self::F64(value) => *value as i64,
       Self::I64(value) => *value,
-      _ => panic!(
-        "Coercion failed: {:?} cannot be coerced to i64",
-        self
-      ),
-    }
+      _ => {
+        return Err(format!(
+          "Coercion failed: {:?} cannot be coerced to i64",
+          self
+        ))
+      }
+    })
   }
 
-  pub(crate) fn coerce_str(&self) -> String {
-    match self {
+  pub fn coerce_str(&self) -> Result<String, String> {
+    Ok(match self {
       Self::F64(value) => format!("{value}"),
       Self::I64(value) => format!("{value}"),
       Self::Str(value) => value.clone(),
-      _ => panic!(
-        "Coercion failed: {:?} cannot be coerced to str",
-        self
-      ),
-    }
+      _ => {
+        return Err(format!(
+          "Coercion failed: {:?} cannot be coerced to str",
+          self
+        ))
+      }
+    })
   }
 }
 

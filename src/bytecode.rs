@@ -293,7 +293,8 @@ pub(crate) fn standard_functions<'src>() -> Functions<'src> {
           args
             .first()
             .expect("function missing argument")
-            .coerce_i64(),
+            .coerce_i64()
+            .unwrap_or(0),
         )
       }),
     }),
@@ -308,7 +309,8 @@ pub(crate) fn standard_functions<'src>() -> Functions<'src> {
           args
             .first()
             .expect("function missing argument")
-            .coerce_f64(),
+            .coerce_f64()
+            .unwrap_or(0.),
         )
       }),
     }),
@@ -323,7 +325,8 @@ pub(crate) fn standard_functions<'src>() -> Functions<'src> {
           args
             .first()
             .expect("function missing argument")
-            .coerce_str(),
+            .coerce_str()
+            .unwrap_or("".to_string()),
         )
       }),
     }),
@@ -340,7 +343,8 @@ fn unary_fn<'a>(f: fn(f64) -> f64) -> FnDecl<'a> {
         .into_iter()
         .next()
         .expect("function missing argument")
-        .coerce_f64()))
+        .coerce_f64()
+        .unwrap()))
     }),
   })
 }
@@ -354,11 +358,13 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDecl<'a> {
       let lhs = args
         .next()
         .expect("function missing the first argument")
-        .coerce_f64();
+        .coerce_f64()
+        .unwrap();
       let rhs = args
         .next()
         .expect("function missing the second argument")
-        .coerce_f64();
+        .coerce_f64()
+        .unwrap();
       Value::F64(f(lhs, rhs))
     }),
   })
