@@ -1,4 +1,5 @@
 use std::{
+  any::Any,
   collections::HashMap,
   io::{Read, Write},
   rc::Rc,
@@ -220,14 +221,14 @@ impl<'src> UserFn<'src> {
 pub struct NativeFn<'src> {
   args: Vec<(&'src str, TypeDecl)>,
   ret_type: TypeDecl,
-  pub(crate) code: Box<dyn Fn(&[Value]) -> Value>,
+  pub(crate) code: Box<dyn Fn(&dyn Any, &[Value]) -> Value>,
 }
 
 impl<'src> NativeFn<'src> {
   pub fn new(
     args: Vec<(&'src str, TypeDecl)>,
     ret_type: TypeDecl,
-    code: Box<dyn Fn(&[Value]) -> Value>,
+    code: Box<dyn Fn(&dyn Any, &[Value]) -> Value>,
   ) -> Self {
     Self {
       args,
@@ -287,7 +288,7 @@ pub(crate) fn standard_functions<'src>() -> Functions<'src> {
     FnDecl::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
       ret_type: TypeDecl::I64,
-      code: Box::new(move |args| {
+      code: Box::new(move |_, args| {
         Value::I64(
           args
             .first()
@@ -302,7 +303,7 @@ pub(crate) fn standard_functions<'src>() -> Functions<'src> {
     FnDecl::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
       ret_type: TypeDecl::F64,
-      code: Box::new(move |args| {
+      code: Box::new(move |_, args| {
         Value::F64(
           args
             .first()
@@ -317,7 +318,7 @@ pub(crate) fn standard_functions<'src>() -> Functions<'src> {
     FnDecl::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
       ret_type: TypeDecl::Str,
-      code: Box::new(move |args| {
+      code: Box::new(move |_, args| {
         Value::Str(
           args
             .first()
@@ -334,7 +335,7 @@ fn unary_fn<'a>(f: fn(f64) -> f64) -> FnDecl<'a> {
   FnDecl::Native(NativeFn {
     args: vec![("lhs", TypeDecl::F64), ("rhs", TypeDecl::F64)],
     ret_type: TypeDecl::F64,
-    code: Box::new(move |args| {
+    code: Box::new(move |_, args| {
       Value::F64(f(args
         .into_iter()
         .next()
@@ -348,7 +349,7 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDecl<'a> {
   FnDecl::Native(NativeFn {
     args: vec![("lhs", TypeDecl::F64), ("rhs", TypeDecl::F64)],
     ret_type: TypeDecl::F64,
-    code: Box::new(move |args| {
+    code: Box::new(move |_, args| {
       let mut args = args.into_iter();
       let lhs = args
         .next()
@@ -363,7 +364,7 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDecl<'a> {
   })
 }
 
-fn print_fn(args: &[Value]) -> Value {
+fn print_fn(_: &dyn Any, args: &[Value]) -> Value {
   for arg in args {
     print!("{} ", arg);
   }
@@ -371,12 +372,12 @@ fn print_fn(args: &[Value]) -> Value {
   Value::F64(0.)
 }
 
-fn dbg_fn(values: &[Value]) -> Value {
+fn dbg_fn(_: &dyn Any, values: &[Value]) -> Value {
   println!("dbg: {:?}", values[0]);
   Value::I64(0)
 }
 
-fn puts_fn(args: &[Value]) -> Value {
+fn puts_fn(_: &dyn Any, args: &[Value]) -> Value {
   for arg in args {
     print!("{}", arg);
   }

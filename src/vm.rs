@@ -44,6 +44,7 @@ impl StackFrame {
 pub struct Vm {
   bytecode: Rc<ByteCode>,
   stack_frames: Vec<StackFrame>,
+  user_data: Box<dyn std::any::Any>,
 }
 
 impl std::fmt::Debug for Vm {
@@ -56,10 +57,14 @@ impl std::fmt::Debug for Vm {
 }
 
 impl Vm {
-  pub fn new(bytecode: Rc<ByteCode>) -> Self {
+  pub fn new(
+    bytecode: Rc<ByteCode>,
+    user_data: Box<dyn std::any::Any>,
+  ) -> Self {
     Self {
       bytecode,
       stack_frames: vec![],
+      user_data,
     }
   }
 
@@ -92,7 +97,9 @@ impl Vm {
       })?;
     let fn_def = match fn_def {
       FnDef::User(user) => user.clone(),
-      FnDef::Native(n) => return Ok((*n.code)(args)),
+      FnDef::Native(n) => {
+        return Ok((*n.code)(self.user_data.as_ref(), args))
+      }
     };
 
     self
@@ -220,7 +227,8 @@ impl Vm {
           match fn_def {
             FnDef::User(user_fn) => {
               if user_fn.cofn {
-                let mut vm = Vm::new(self.bytecode.clone());
+                let mut vm =
+                  Vm::new(self.bytecode.clone(), Box::new(()));
                 vm.stack_frames.push(StackFrame::new(
                   user_fn.clone(),
                   args.to_vec(),
@@ -241,7 +249,8 @@ impl Vm {
               }
             }
             FnDef::Native(native) => {
-              let res = (native.code)(args);
+              let res =
+                (native.code)(self.user_data.as_ref(), args);
               let stack = &mut self.top_mut()?.stack;
               stack.resize(
                 stack.len() - instruction.arg0 as usize - 1,
