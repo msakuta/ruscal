@@ -1,3 +1,13 @@
+pub mod ast;
+pub mod bytecode;
+pub mod compiler;
+pub mod file_io;
+mod instructions;
+pub mod parser;
+pub mod type_checker;
+pub mod value;
+pub mod vm;
+
 use std::sync::atomic::AtomicBool;
 
 pub enum RunMode {
@@ -14,6 +24,18 @@ pub struct Args {
   pub output: String,
   pub disasm: bool,
   pub show_ast: bool,
+}
+
+impl Args {
+  pub fn new() -> Self {
+    Self {
+      run_mode: RunMode::CompileAndRun,
+      source: None,
+      output: "".to_string(),
+      disasm: false,
+      show_ast: false,
+    }
+  }
 }
 
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
