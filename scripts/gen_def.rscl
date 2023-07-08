@@ -1,0 +1,9 @@
+
+generator add(a) {
+    yield a + 1;
+    yield a + 2;
+    a + 3;
+}
+
+var g = add(1, 2);
+print(g);

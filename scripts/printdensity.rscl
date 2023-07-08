@@ -1,0 +1,15 @@
+fn printdensity(d: f64) -> i64 {
+  if d > 127 {
+    puts(" ");
+  } else if d > 8 {
+    puts(".");
+  } else if d > 4 {
+    puts("+");
+  } else {
+    puts("*");
+  };
+}
+
+for c in 0 to 128 {
+    printdensity(c);
+}
