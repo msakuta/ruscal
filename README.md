@@ -39,7 +39,9 @@ Although its target is not a useful language, it has few notable features:
 
 There are number of example scripts in [scripts](scripts) directory, but most of them require specific step of the interpreter to run. Those target step numbers are indicated by prefixes of the file names.
 
-For example, this is a Mandelbrot set in ASCII art, rendered with [mandel.txt](scripts/mandel.txt):
+The standard script file extension is `.rscl`, because there is already a language called Rascal and they took `.rsc`.
+
+For example, this is a Mandelbrot set in ASCII art, rendered with [mandel.txt](scripts/17-mandel.rscl):
 
 ```raw
 ******************************************************************************
