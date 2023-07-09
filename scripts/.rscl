@@ -1,8 +1,0 @@
-
-fn add_ints(a: i64, b: i64) -> i64 {
-    return a + b;
-}
-
-var res: i64 = add_ints(123, 456);
-
-print(res);

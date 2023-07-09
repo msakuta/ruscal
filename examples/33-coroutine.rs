@@ -882,7 +882,8 @@ impl Compiler {
           self.target_stack = target_stack;
         }
         Statement::Return(ex) => {
-          return Ok(Some(self.compile_expr(ex)?));
+          let res = self.compile_expr(ex)?;
+          self.add_inst(OpCode::Ret, res.0 as u8);
         }
         Statement::Yield(ex) => {
           let res = self.compile_expr(ex)?;
@@ -1171,6 +1172,33 @@ impl Vm {
     Ok(())
   }
 
+  fn return_fn(
+    &mut self,
+  ) -> Result<Option<YieldResult>, Box<dyn Error>> {
+    let top_frame = self.top_mut()?;
+    let res = top_frame.stack.pop().ok_or_else(|| {
+      format!(
+        "Stack underflow at Ret ({}) {:?}",
+        top_frame.ip, top_frame.stack
+      )
+    })?;
+    let args = top_frame.args;
+
+    if self.stack_frames.pop().is_none()
+      || self.stack_frames.is_empty()
+    {
+      return Ok(Some(YieldResult::Finished(res)));
+    }
+
+    dprintln!("Returning {}", res);
+
+    let stack = &mut self.top_mut()?.stack;
+    stack.resize(stack.len() - args - 1, Value::F64(0.));
+    stack.push(res);
+    self.top_mut()?.ip += 1;
+    Ok(None)
+  }
+
   fn interpret(
     &mut self,
   ) -> Result<YieldResult, Box<dyn std::error::Error>> {
@@ -1179,23 +1207,9 @@ impl Vm {
         if let Some(instruction) = self.top()?.inst() {
           instruction
         } else {
-          let top_frame = self.top_mut()?;
-          let res = top_frame
-            .stack
-            .pop()
-            .ok_or_else(|| "Stack underflow".to_string())?;
-          let args = top_frame.args;
-
-          if self.stack_frames.pop().is_none()
-            || self.stack_frames.is_empty()
-          {
-            return Ok(YieldResult::Finished(res));
+          if let Some(res) = self.return_fn()? {
+            return Ok(res);
           }
-
-          let stack = &mut self.top_mut()?.stack;
-          stack.resize(stack.len() - args - 1, Value::F64(0.));
-          stack.push(res);
-          self.top_mut()?.ip += 1;
           continue;
         };
 
@@ -1319,20 +1333,10 @@ impl Vm {
           );
         }
         OpCode::Ret => {
-          let top_frame = self.top_mut()?;
-          let res = top_frame
-            .stack
-            .pop()
-            .ok_or_else(|| "Stack underflow".to_string())?;
-          let args = top_frame.args;
-          let stack = &mut self.top_mut()?.stack;
-          stack.resize(stack.len() - args - 1, Value::F64(0.));
-          stack.push(res);
-          return Ok(YieldResult::Finished(
-            stack
-              .pop()
-              .ok_or_else(|| "Stack underflow".to_string())?,
-          ));
+          if let Some(res) = self.return_fn()? {
+            return Ok(res);
+          }
+          continue;
         }
         OpCode::Yield => {
           let top_frame = self.top_mut()?;
