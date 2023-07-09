@@ -472,7 +472,8 @@ impl Compiler {
           self.target_stack = target_stack;
         }
         Statement::Return(ex) => {
-          return Ok(Some(self.compile_expr(ex)?));
+          let res = self.compile_expr(ex)?;
+          self.add_inst(OpCode::Ret, res.0 as u8);
         }
         Statement::Yield(ex) => {
           let res = self.compile_expr(ex)?;
