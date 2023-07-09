@@ -59,7 +59,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let reader = std::fs::File::open(&code_file)?;
       let mut reader = BufReader::new(reader);
       let bytecode = Rc::new(read_program(&mut reader)?);
-      run_coro(Vm::new(bytecode, Box::new(())));
+      run_coro(Vm::new(
+        bytecode,
+        Box::new(()),
+        args.debug_output,
+      ));
     }
     RunMode::CompileAndRun => {
       let mut buf = vec![];
@@ -74,7 +78,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
       let bytecode = Rc::new(read_program(
         &mut std::io::Cursor::new(&mut buf),
       )?);
-      run_coro(Vm::new(bytecode, Box::new(())));
+      run_coro(Vm::new(
+        bytecode,
+        Box::new(()),
+        args.debug_output,
+      ));
     }
     _ => {
       println!("Please specify -c, -r, -t or -R as an argument")

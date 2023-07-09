@@ -508,7 +508,7 @@ impl Compiler {
     Ok(())
   }
 
-  pub(crate) fn disasm(
+  pub fn disasm(
     &self,
     writer: &mut impl Write,
   ) -> std::io::Result<()> {

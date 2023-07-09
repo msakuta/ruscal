@@ -45,6 +45,7 @@ pub struct Vm {
   bytecode: Rc<ByteCode>,
   stack_frames: Vec<StackFrame>,
   user_data: Box<dyn std::any::Any>,
+  debug_output: bool,
 }
 
 impl std::fmt::Debug for Vm {
@@ -60,11 +61,13 @@ impl Vm {
   pub fn new(
     bytecode: Rc<ByteCode>,
     user_data: Box<dyn std::any::Any>,
+    debug_output: bool,
   ) -> Self {
     Self {
       bytecode,
       stack_frames: vec![],
       user_data,
+      debug_output,
     }
   }
 
@@ -139,9 +142,9 @@ impl Vm {
     &mut self,
   ) -> Result<YieldResult, Box<dyn std::error::Error>> {
     loop {
-      let instruction =
+      let (instruction, ip) =
         if let Some(instruction) = self.top()?.inst() {
-          instruction
+          (instruction, self.top()?.ip)
         } else {
           let top_frame = self.top_mut()?;
           let res = top_frame
@@ -162,6 +165,13 @@ impl Vm {
           self.top_mut()?.ip += 1;
           continue;
         };
+
+      if self.debug_output {
+        println!(
+          "interpret[{ip}]: {instruction:?} stack: {stack:?}",
+          stack = self.top()?.stack
+        );
+      }
 
       match instruction.op {
         OpCode::LoadLiteral => {
@@ -227,8 +237,11 @@ impl Vm {
           match fn_def {
             FnDef::User(user_fn) => {
               if user_fn.cofn {
-                let mut vm =
-                  Vm::new(self.bytecode.clone(), Box::new(()));
+                let mut vm = Vm::new(
+                  self.bytecode.clone(),
+                  Box::new(()),
+                  self.debug_output,
+                );
                 vm.stack_frames.push(StackFrame::new(
                   user_fn.clone(),
                   args.to_vec(),
@@ -286,19 +299,13 @@ impl Vm {
         }
         OpCode::Ret => {
           let top_frame = self.top_mut()?;
-          let res = top_frame
-            .stack
-            .pop()
-            .ok_or_else(|| "Stack underflow".to_string())?;
-          let args = top_frame.args;
-          let stack = &mut self.top_mut()?.stack;
-          stack.resize(stack.len() - args - 1, Value::F64(0.));
-          stack.push(res);
-          return Ok(YieldResult::Finished(
-            stack
-              .pop()
-              .ok_or_else(|| "Stack underflow".to_string())?,
-          ));
+          let res = top_frame.stack.pop().ok_or_else(|| {
+            format!(
+              "Stack underflow at Ret ({}) {:?}",
+              top_frame.ip, top_frame.stack
+            )
+          })?;
+          return Ok(YieldResult::Finished(res));
         }
         OpCode::Yield => {
           let top_frame = self.top_mut()?;
