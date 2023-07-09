@@ -473,7 +473,10 @@ impl Compiler {
         }
         Statement::Return(ex) => {
           let res = self.compile_expr(ex)?;
-          self.add_inst(OpCode::Ret, res.0 as u8);
+          self.add_inst(
+            OpCode::Ret,
+            (self.target_stack.len() - res.0 - 1) as u8,
+          );
         }
         Statement::Yield(ex) => {
           let res = self.compile_expr(ex)?;
@@ -544,7 +547,7 @@ fn disasm_common(
         "    [{i}] {:?} {} ({:?})",
         inst.op, inst.arg0, literals[inst.arg0 as usize]
       )?,
-      Copy | Call | Jmp | Jf | Pop | Store => writeln!(
+      Copy | Call | Jmp | Jf | Pop | Store | Ret => writeln!(
         writer,
         "    [{i}] {:?} {}",
         inst.op, inst.arg0

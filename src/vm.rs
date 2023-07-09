@@ -140,19 +140,20 @@ impl Vm {
 
   fn return_fn(
     &mut self,
+    stack_pos: u8,
   ) -> Result<Option<YieldResult>, Box<dyn Error>> {
-    let top_frame = self.top_mut()?;
-    let res = top_frame.stack.pop().ok_or_else(|| {
-      format!(
-        "Stack underflow at Ret ({}) {:?}",
-        top_frame.ip, top_frame.stack
-      )
-    })?;
+    let top_frame = self
+      .stack_frames
+      .pop()
+      .ok_or_else(|| "Stack frame underflow at Ret")?;
+    let res = top_frame
+      .stack
+      .get(top_frame.stack.len() - stack_pos as usize - 1)
+      .ok_or_else(|| "Stack underflow at Ret")?
+      .clone();
     let args = top_frame.args;
 
-    if self.stack_frames.pop().is_none()
-      || self.stack_frames.is_empty()
-    {
+    if self.stack_frames.is_empty() {
       return Ok(Some(YieldResult::Finished(res)));
     }
 
@@ -175,7 +176,7 @@ impl Vm {
         if let Some(instruction) = self.top()?.inst() {
           (instruction, self.top()?.ip)
         } else {
-          if let Some(res) = self.return_fn()? {
+          if let Some(res) = self.return_fn(0)? {
             return Ok(res);
           }
           continue;
@@ -313,7 +314,7 @@ impl Vm {
           );
         }
         OpCode::Ret => {
-          if let Some(res) = self.return_fn()? {
+          if let Some(res) = self.return_fn(instruction.arg0)? {
             return Ok(res);
           }
           continue;
