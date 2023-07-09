@@ -419,7 +419,7 @@ fn disasm_common(
         "    [{i}] {:?} {} ({:?})",
         inst.op, inst.arg0, literals[inst.arg0 as usize]
       )?,
-      Copy | Call | Jmp | Jf | Pop | Store => writeln!(
+      Copy | Call | Jmp | Jf | Pop | Store | Ret => writeln!(
         writer,
         "    [{i}] {:?} {}",
         inst.op, inst.arg0
@@ -831,7 +831,11 @@ impl Compiler {
           self.target_stack = target_stack;
         }
         Statement::Return(ex) => {
-          return Ok(Some(self.compile_expr(ex)?));
+          let res = self.compile_expr(ex)?;
+          self.add_inst(
+            OpCode::Ret,
+            (self.target_stack.len() - res.0 - 1) as u8,
+          );
         }
       }
     }
@@ -1082,8 +1086,9 @@ impl ByteCode {
         OpCode::Ret => {
           return Ok(
             stack
-              .pop()
-              .ok_or_else(|| "Stack underflow".to_string())?,
+              .get(stack.len() - instruction.arg0 as usize - 1)
+              .ok_or_else(|| "Stack underflow".to_string())?
+              .clone(),
           );
         }
       }
