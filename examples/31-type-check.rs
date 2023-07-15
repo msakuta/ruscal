@@ -30,6 +30,8 @@ pub enum OpCode {
   LoadLiteral,
   Store,
   Copy,
+  /// Duplicate the value on the top of the stack arg0 times
+  Dup,
   Add,
   Sub,
   Mul,
@@ -66,6 +68,7 @@ impl_op_from!(
   LoadLiteral,
   Store,
   Copy,
+  Dup,
   Add,
   Sub,
   Mul,
@@ -284,6 +287,7 @@ enum Target {
 struct LoopFrame {
   start: StkIdx,
   break_ips: Vec<InstPtr>,
+  continue_ips: Vec<(InstPtr, usize)>,
 }
 
 impl LoopFrame {
@@ -291,6 +295,7 @@ impl LoopFrame {
     Self {
       start,
       break_ips: vec![],
+      continue_ips: vec![],
     }
   }
 }
@@ -419,11 +424,13 @@ fn disasm_common(
         "    [{i}] {:?} {} ({:?})",
         inst.op, inst.arg0, literals[inst.arg0 as usize]
       )?,
-      Copy | Call | Jmp | Jf | Pop | Store | Ret => writeln!(
-        writer,
-        "    [{i}] {:?} {}",
-        inst.op, inst.arg0
-      )?,
+      Copy | Dup | Call | Jmp | Jf | Pop | Store | Ret => {
+        writeln!(
+          writer,
+          "    [{i}] {:?} {}",
+          inst.op, inst.arg0
+        )?
+      }
       _ => writeln!(writer, "    [{i}] {:?}", inst.op)?,
     }
   }
@@ -473,6 +480,19 @@ impl Compiler {
     let break_jmp_addr = self.instructions.len();
     for ip in loop_frame.break_ips {
       self.instructions[ip.0].arg0 = break_jmp_addr as u8;
+    }
+    Ok(())
+  }
+
+  fn fixup_continues(&mut self) -> Result<(), Box<dyn Error>> {
+    let loop_frame =
+      self.loop_stack.last().ok_or(LoopStackUnderflowError)?;
+    let continue_jmp_addr = self.instructions.len();
+    for (ip, stk) in &loop_frame.continue_ips {
+      self.instructions[ip.0].arg0 =
+        (self.target_stack.len() - stk) as u8;
+      self.instructions[ip.0 + 1].arg0 =
+        continue_jmp_addr as u8;
     }
     Ok(())
   }
@@ -784,6 +804,7 @@ impl Compiler {
           dprintln!("start in loop: {:?}", self.target_stack);
           self.loop_stack.push(LoopFrame::new(stk_loop_var));
           self.compile_stmts(stmts)?;
+          self.fixup_continues()?;
           let one = self.add_literal(Value::F64(1.));
           dprintln!("end in loop: {:?}", self.target_stack);
           self.add_copy_inst(stk_loop_var);
@@ -810,6 +831,26 @@ impl Compiler {
             .ok_or(LoopStackUnderflowError)?;
           let break_ip = self.instructions.len();
           loop_frame.break_ips.push(InstPtr(break_ip));
+          self.add_inst(OpCode::Jmp, 0);
+        }
+        Statement::Continue => {
+          let start = self
+            .loop_stack
+            .last()
+            .map(|frame| frame.start)
+            .ok_or(LoopStackUnderflowError)?;
+          self.add_pop_until_inst(start);
+
+          let loop_frame = self
+            .loop_stack
+            .last_mut()
+            .ok_or(LoopStackUnderflowError)?;
+          let continue_ip = self.instructions.len();
+          loop_frame.continue_ips.push((
+            InstPtr(continue_ip),
+            self.target_stack.len(),
+          ));
+          self.add_inst(OpCode::Dup, 0);
           self.add_inst(OpCode::Jmp, 0);
         }
         Statement::FnDef {
@@ -1024,6 +1065,11 @@ impl ByteCode {
             stack[stack.len() - instruction.arg0 as usize - 1]
               .clone(),
           );
+        }
+        OpCode::Dup => {
+          let top = stack.last().unwrap().clone();
+          stack
+            .extend((0..instruction.arg0).map(|_| top.clone()));
         }
         OpCode::Add => self.interpret_bin_op_str(
           &mut stack,
@@ -1607,7 +1653,8 @@ fn type_check<'src>(
       }
       Statement::Break => {
         // TODO: check types in break out site. For now we disallow break with values like Rust.
-      } // Statement::Continue => (),
+      }
+      Statement::Continue => (),
     }
   }
   Ok(res)
@@ -1751,6 +1798,8 @@ enum Statement<'src> {
     end: Expression<'src>,
     stmts: Statements<'src>,
   },
+  Break,
+  Continue,
   FnDef {
     name: Span<'src>,
     args: Vec<(Span<'src>, TypeDecl)>,
@@ -1758,8 +1807,6 @@ enum Statement<'src> {
     stmts: Statements<'src>,
   },
   Return(Expression<'src>),
-  Break,
-  // Continue,
 }
 
 impl<'src> Statement<'src> {
@@ -1774,7 +1821,7 @@ impl<'src> Statement<'src> {
         calc_offset(*name, stmts.span())
       }
       Return(ex) => ex.span,
-      Break => return None,
+      Break | Continue => return None,
     })
   }
 }
@@ -2140,10 +2187,10 @@ fn break_statement(i: Span) -> IResult<Span, Statement> {
   Ok((i, Statement::Break))
 }
 
-// fn continue_statement(i: Span) -> IResult<Span, Statement> {
-//   let (i, _) = space_delimited(tag("continue"))(i)?;
-//   Ok((i, Statement::Continue))
-// }
+fn continue_statement(i: Span) -> IResult<Span, Statement> {
+  let (i, _) = space_delimited(tag("continue"))(i)?;
+  Ok((i, Statement::Continue))
+}
 
 fn general_statement<'a>(
   last: bool,
@@ -2164,7 +2211,7 @@ fn general_statement<'a>(
       for_statement,
       terminated(return_statement, terminator),
       terminated(break_statement, terminator),
-      // terminated(continue_statement, terminator),
+      terminated(continue_statement, terminator),
       terminated(expr_statement, terminator),
     ))(input)
   }
