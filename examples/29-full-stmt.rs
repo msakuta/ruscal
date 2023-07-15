@@ -27,6 +27,8 @@ pub enum OpCode {
   LoadLiteral,
   Store,
   Copy,
+  /// Duplicate the value on the top of the stack arg0 times
+  Dup,
   Add,
   Sub,
   Mul,
@@ -61,6 +63,7 @@ impl_op_from!(
   LoadLiteral,
   Store,
   Copy,
+  Dup,
   Add,
   Sub,
   Mul,
@@ -245,6 +248,7 @@ enum Target {
 struct LoopFrame {
   start: StkIdx,
   break_ips: Vec<InstPtr>,
+  continue_ips: Vec<(InstPtr, usize)>,
 }
 
 impl LoopFrame {
@@ -252,6 +256,7 @@ impl LoopFrame {
     Self {
       start,
       break_ips: vec![],
+      continue_ips: vec![],
     }
   }
 }
@@ -297,6 +302,19 @@ impl Compiler {
     let break_jmp_addr = self.instructions.len();
     for ip in loop_frame.break_ips {
       self.instructions[ip.0].arg0 = break_jmp_addr as u8;
+    }
+    Ok(())
+  }
+
+  fn fixup_continues(&mut self) -> Result<(), Box<dyn Error>> {
+    let loop_frame =
+      self.loop_stack.last().ok_or(LoopStackUnderflowError)?;
+    let continue_jmp_addr = self.instructions.len();
+    for (ip, stk) in &loop_frame.continue_ips {
+      self.instructions[ip.0].arg0 =
+        (self.target_stack.len() - stk) as u8;
+      self.instructions[ip.0 + 1].arg0 =
+        continue_jmp_addr as u8;
     }
     Ok(())
   }
@@ -588,6 +606,7 @@ impl Compiler {
           dprintln!("start in loop: {:?}", self.target_stack);
           self.loop_stack.push(LoopFrame::new(stk_loop_var));
           self.compile_stmts(stmts)?;
+          self.fixup_continues()?;
           let one = self.add_literal(Value::F64(1.));
           dprintln!("end in loop: {:?}", self.target_stack);
           self.add_copy_inst(stk_loop_var);
@@ -614,6 +633,26 @@ impl Compiler {
             .ok_or(LoopStackUnderflowError)?;
           let break_ip = self.instructions.len();
           loop_frame.break_ips.push(InstPtr(break_ip));
+          self.add_inst(OpCode::Jmp, 0);
+        }
+        Statement::Continue => {
+          let start = self
+            .loop_stack
+            .last()
+            .map(|frame| frame.start)
+            .ok_or(LoopStackUnderflowError)?;
+          self.add_pop_until_inst(start);
+
+          let loop_frame = self
+            .loop_stack
+            .last_mut()
+            .ok_or(LoopStackUnderflowError)?;
+          let continue_ip = self.instructions.len();
+          loop_frame.continue_ips.push((
+            InstPtr(continue_ip),
+            self.target_stack.len(),
+          ));
+          self.add_inst(OpCode::Dup, 0);
           self.add_inst(OpCode::Jmp, 0);
         }
       }
@@ -768,6 +807,11 @@ impl ByteCode {
             stack[stack.len() - instruction.arg0 as usize - 1]
               .clone(),
           );
+        }
+        OpCode::Dup => {
+          let top = stack.last().unwrap().clone();
+          stack
+            .extend((0..instruction.arg0).map(|_| top.clone()));
         }
         OpCode::Add => self
           .interpret_bin_op(&mut stack, |lhs, rhs| lhs + rhs),
@@ -959,6 +1003,7 @@ enum Statement<'src> {
     stmts: Statements<'src>,
   },
   Break,
+  Continue,
 }
 
 type Statements<'a> = Vec<Statement<'a>>;
@@ -1158,6 +1203,11 @@ fn break_stmt(input: &str) -> IResult<&str, Statement> {
   Ok((r, Statement::Break))
 }
 
+fn continue_statement(i: &str) -> IResult<&str, Statement> {
+  let (i, _) = space_delimited(tag("continue"))(i)?;
+  Ok((i, Statement::Continue))
+}
+
 fn general_statement<'a>(
   last: bool,
 ) -> impl Fn(&'a str) -> IResult<&'a str, Statement> {
@@ -1175,6 +1225,7 @@ fn general_statement<'a>(
       terminated(var_assign, terminator),
       for_statement,
       terminated(break_stmt, terminator),
+      terminated(continue_statement, terminator),
       terminated(expr_statement, terminator),
     ))(input)
   }
