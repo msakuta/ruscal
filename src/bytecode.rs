@@ -157,7 +157,7 @@ fn disasm_common(
         "    [{i}] {:?} {} ({:?})",
         inst.op, inst.arg0, literals[inst.arg0 as usize]
       )?,
-      Copy | Call | Jmp | Jf | Pop | Store => writeln!(
+      Copy | Dup | Call | Jmp | Jf | Pop | Store => writeln!(
         writer,
         "    [{i}] {:?} {}",
         inst.op, inst.arg0

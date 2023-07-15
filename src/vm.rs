@@ -212,6 +212,12 @@ impl Vm {
               .clone(),
           );
         }
+        OpCode::Dup => {
+          let stack = &mut self.top_mut()?.stack;
+          let top = stack.last().unwrap().clone();
+          stack
+            .extend((0..instruction.arg0).map(|_| top.clone()));
+        }
         OpCode::Add => Self::interpret_bin_op_str(
           &mut self.top_mut()?.stack,
           |lhs, rhs| lhs + rhs,

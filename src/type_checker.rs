@@ -319,7 +319,8 @@ pub fn type_check<'src>(
       }
       Statement::Break => {
         // TODO: check types in break out site. For now we disallow break with values like Rust.
-      } // Statement::Continue => (),
+      }
+      Statement::Continue => (),
       Statement::Yield(e) => {
         tc_expr(e, ctx)?;
         // TODO: check type with the return type, but don't escape from this function.

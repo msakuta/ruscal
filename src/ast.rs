@@ -66,6 +66,7 @@ pub enum Statement<'src> {
     stmts: Statements<'src>,
   },
   Break,
+  Continue,
   FnDef {
     name: Span<'src>,
     args: Vec<(Span<'src>, TypeDecl)>,
@@ -90,6 +91,7 @@ impl<'src> Statement<'src> {
       }
       Return(ex) => ex.span,
       Break => return None,
+      Continue => return None,
       Yield(ex) => ex.span,
     })
   }

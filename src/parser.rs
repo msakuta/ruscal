@@ -395,10 +395,10 @@ fn break_statement(i: Span) -> IResult<Span, Statement> {
   Ok((i, Statement::Break))
 }
 
-// fn continue_statement(i: Span) -> IResult<Span, Statement> {
-//   let (i, _) = space_delimited(tag("continue"))(i)?;
-//   Ok((i, Statement::Continue))
-// }
+fn continue_statement(i: Span) -> IResult<Span, Statement> {
+  let (i, _) = space_delimited(tag("continue"))(i)?;
+  Ok((i, Statement::Continue))
+}
 
 fn yield_statement(i: Span) -> IResult<Span, Statement> {
   let (i, _) = space_delimited(tag("yield"))(i)?;
@@ -425,7 +425,7 @@ fn general_statement<'a>(
       for_statement,
       terminated(return_statement, terminator),
       terminated(break_statement, terminator),
-      // terminated(continue_statement, terminator),
+      terminated(continue_statement, terminator),
       terminated(yield_statement, terminator),
       terminated(expr_statement, terminator),
     ))(input)

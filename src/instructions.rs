@@ -6,6 +6,8 @@ pub enum OpCode {
   LoadLiteral,
   Store,
   Copy,
+  /// Duplicate the value on the top of the stack arg0 times
+  Dup,
   Add,
   Sub,
   Mul,
@@ -46,6 +48,7 @@ impl_op_from!(
   LoadLiteral,
   Store,
   Copy,
+  Dup,
   Add,
   Sub,
   Mul,

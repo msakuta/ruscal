@@ -1,0 +1,7 @@
+
+for i in 0 to 5 {
+    if i < i64(2) {
+        continue;
+    };
+    print(i);
+}
