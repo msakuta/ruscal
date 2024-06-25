@@ -299,7 +299,7 @@ impl Compiler {
         }
 
         self.add_inst(OpCode::Call, args.len() as u8);
-        self.target_stack.resize(stack_before_call + 1, 0);
+        self.target_stack.resize(self.target_stack.len() - args.len(), 0);
         self.target_stack.len() - 1
       }
     }
@@ -314,10 +314,10 @@ impl Compiler {
     let lhs = self.compile_expr(lhs);
     let rhs = self.compile_expr(rhs);
     self.add_copy_inst(lhs);
-    self.target_stack.push(self.target_stack[lhs as usize]);
     self.add_copy_inst(rhs);
-    self.target_stack.pop();
     self.add_inst(op, 0);
+    self.target_stack.pop();
+    self.target_stack.pop();
     self.target_stack.push(usize::MAX);
     self.target_stack.len() - 1
   }
@@ -472,7 +472,7 @@ impl ByteCode {
             _ => panic!("Unknown function name {fname:?}"),
           };
           stack.resize(
-            stack.len() - instruction.arg0 as usize,
+            stack.len() - instruction.arg0 as usize - 1,
             Value::F64(0.),
           );
           stack.push(res);
