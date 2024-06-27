@@ -486,9 +486,7 @@ impl Compiler {
         self
           .target_stack
           .resize(stack_before_call + 1, Target::Temp);
-        if stack_before_args < stack_before_call {
-          self.add_pop_until_inst(StkIdx(stack_before_args));
-        }
+        self.coerce_stack(StkIdx(stack_before_args));
         self.stack_top()
       }
       Expression::If(cond, true_branch, false_branch) => {
