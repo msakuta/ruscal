@@ -284,7 +284,6 @@ impl Compiler {
         self.bin_op(OpCode::Div, lhs, rhs)
       }
       Expression::FnInvoke(name, args) => {
-        let stack_before_call = self.target_stack.len();
         let name =
           self.add_literal(Value::Str(name.to_string()));
         let args = args

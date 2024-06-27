@@ -376,7 +376,6 @@ impl Compiler {
         self.bin_op(OpCode::Lt, lhs, rhs)
       }
       Expression::FnInvoke(name, args) => {
-        let stack_before_call = self.target_stack.len();
         let name =
           self.add_literal(Value::Str(name.to_string()));
         let args = args
@@ -388,11 +387,10 @@ impl Compiler {
         self.target_stack.push(0);
         for arg in &args {
           self.add_copy_inst(*arg);
-          self.target_stack.push(0);
         }
 
         self.add_inst(OpCode::Call, args.len() as u8);
-        self.target_stack.resize(stack_before_call + 1, 0);
+        self.target_stack.resize(self.target_stack.len() - args.len(), 0);
         self.stack_top()
       }
       Expression::If(cond, true_branch, false_branch) => {
@@ -426,6 +424,8 @@ impl Compiler {
     self.add_copy_inst(lhs);
     self.add_copy_inst(rhs);
     self.add_inst(op, 0);
+    self.target_stack.pop();
+    self.target_stack.pop();
     self.target_stack.push(usize::MAX);
     self.stack_top()
   }
