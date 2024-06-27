@@ -9,6 +9,12 @@ RUSty CALculator scripting language learning project
 
 ## Overview
 
+This repo is the implementation of the example script used in my book:
+[Rustで作るプログラミング言語](https://www.amazon.co.jp/dp/4297141922) (Japanese).
+
+This is a sister project of [rustack](https://github.com/msakuta/rustack),
+a custom programming language compiler / interpreter.
+
 Ruscal is a stack-based scripting language specifically designed for learning creating a programming language.
 As such, its target is not a feature-rich next-gen language.
 It is a boring language that intends to help the reader to learn how to make his or her own language.
