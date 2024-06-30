@@ -284,6 +284,10 @@ impl Compiler {
         self.bin_op(OpCode::Div, lhs, rhs)
       }
       Expression::FnInvoke(name, args) => {
+        // Note to the book readers: this code has been changed from the printed book
+        // because the original implementation had a bug that expressions like `2 + pow(3, 4)`
+        // did not work properly.
+        // See the issue https://github.com/msakuta/ruscal/issues/1 for details.
         let name =
           self.add_literal(Value::Str(name.to_string()));
         let args = args
@@ -298,12 +302,18 @@ impl Compiler {
         }
 
         self.add_inst(OpCode::Call, args.len() as u8);
-        self.target_stack.resize(self.target_stack.len() - args.len(), 0);
+        self
+          .target_stack
+          .resize(self.target_stack.len() - args.len(), 0);
         self.target_stack.len() - 1
       }
     }
   }
 
+  /// Note to the book readers: this code has been changed from the printed book
+  /// because the original implementation had a bug that expressions like `2 + pow(3, 4)`
+  /// did not work properly.
+  /// See the issue https://github.com/msakuta/ruscal/issues/1 for details.
   fn bin_op(
     &mut self,
     op: OpCode,
