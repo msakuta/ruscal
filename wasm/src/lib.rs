@@ -237,6 +237,10 @@ pub fn disasm(src: &str) -> Result<String, JsValue> {
     read_program(&mut std::io::Cursor::new(&mut buf))
       .map_err(|e| JsValue::from(e.to_string()))?;
 
+  wasm_functions(|fname, f| {
+    bytecode.add_fn(fname.to_string(), f());
+  });
+
   let mut dis_buf = vec![];
   bytecode
     .disasm(&mut dis_buf)
