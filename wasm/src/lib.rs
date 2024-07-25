@@ -95,8 +95,21 @@ pub fn type_check(src: &str) -> Result<JsValue, JsValue> {
 
 #[wasm_bindgen]
 pub fn compile(src: &str) -> Result<Vec<u8>, JsValue> {
-  let mut bytes = vec![];
-  Ok(bytes)
+  let args = Args::new();
+  let mut buf = vec![];
+
+  write_program(
+    "<input>",
+    src,
+    &mut std::io::Cursor::new(&mut buf),
+    "<Memory>",
+    &args,
+  )
+  .map_err(|e| {
+    JsValue::from_str(&format!("Compile Error: {e}"))
+  })?;
+
+  Ok(buf)
 }
 
 #[wasm_bindgen]
