@@ -6,6 +6,8 @@
 
 RUSty CALculator scripting language learning project
 
+Try it now on your browser! https://msakuta.github.io/ruscal/
+
 
 ## Overview
 
@@ -40,6 +42,23 @@ Although its target is not a useful language, it has few notable features:
 * Static type checking on function arguments, return types and expressions
 * Stack-based bytecode interpreter and compiler
 * Coroutines and generators
+
+
+## WebAssembly browser application
+
+You can also build a wasm package and run the interpreter on the browser.
+
+    cd wasm
+    npm i
+    npm run build
+
+To launch the application, you can use `npx`
+
+    cd dist
+    npx serve
+
+and browse http://localhost:5000.
+
 
 ## Scripts
 
