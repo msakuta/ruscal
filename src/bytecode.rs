@@ -284,6 +284,14 @@ pub(crate) fn standard_functions<'src>() -> Functions<'src> {
     }),
   );
   funcs.insert(
+    "type".to_string(),
+    FnDecl::Native(NativeFn {
+      args: vec![("arg", TypeDecl::Any)],
+      ret_type: TypeDecl::Str,
+      code: Box::new(type_fn),
+    }),
+  );
+  funcs.insert(
     "i64".to_string(),
     FnDecl::Native(NativeFn {
       args: vec![("arg", TypeDecl::Any)],
@@ -388,6 +396,18 @@ fn puts_fn(_: &dyn Any, args: &[Value]) -> Value {
     print!("{}", arg);
   }
   Value::F64(0.)
+}
+
+fn type_fn(_: &dyn Any, args: &[Value]) -> Value {
+  Value::Str(match args.get(0) {
+    Some(value) => match value {
+      Value::I64(_) => "I64".to_string(),
+      Value::F64(_) => "F64".to_string(),
+      Value::Str(_) => "Str".to_string(),
+      Value::Coro(_) => "Coro".to_string(),
+    },
+    _ => "".to_string(),
+  })
 }
 
 pub struct ByteCode {
