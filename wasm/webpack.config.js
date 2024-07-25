@@ -20,8 +20,8 @@ module.exports = {
   plugins: [
     new CopyPlugin({
       patterns: [
-        { from: "../scripts", to: "scripts" },
-        // { from: "scripts", to: "scripts" },
+        // { from: "../scripts", to: "scripts" },
+        { from: "scripts", to: "scripts" },
       ]
     }),
 
