@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
     <head>
-        <title>rusty-parser wasm</title>
+        <title>Ruscal wasm</title>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style type="text/css">
@@ -24,8 +24,7 @@
         </style>
     </head>
     <body>
-        <h1>rusty-parser Wasm</h1>
-        <p>See the <a href="https://github.com/msakuta/rusty-parser/wiki">wiki</a> for syntax.</p>
+        <h1>Ruscal Wasm</h1>
         <hr>
         <div>
             Samples: <span id="samples"></span>
@@ -57,11 +56,8 @@
             <tt>type</tt> can be one of:
             <ul>
                 <li>f64</li>
-                <li>f32</li>
                 <li>i64</li>
-                <li>i32</li>
                 <li>str</li>
-                <li>[type] - declares an array of some other types. Can be nested like <tt>[[i32]]</tt>.</li>
             </ul>
 
             Note that the language is still dynamically typed (although type checker can be run statically),
@@ -72,13 +68,8 @@
 
             <ul>
             <li>print(s, ...) - Prints arguments to the output and a newline.</li>
+            <li>dbg(s) - Prints the argument value in a debugging form.</li>
             <li>puts(s, ...) - Prints arguments without a newline.</li>
-            <li>type(obj) -> str - Returns a string representing type of given object.</li>
-            <li>len(a: [any]) -> i64 - Returns length of a given array.</li>
-            <li>push(a: [any], val: any) - Puts an element at the end of the array, expanding its length by 1.</li>
-            <li>hex_string(value: i64) - Converts an integer to 2-digit hexadecimal representation string.</li>
-            <li>set_fill_style(style) - Sets style for painting on the canvas.</li>
-            <li>rectangle(x: i64, y: i64, width: i64, height: i64) - Draws a filled rectangle on the canvas.</li>
             </ul>
 
             <h2 id="Time">Time measurement resolution</h2>
@@ -89,7 +80,7 @@
         </div>
 
         <hr>
-        <p>Source on <a href="https://github.com/msakuta/rusty-parser">GitHub</a>.</p>
+        <p>Source on <a href="https://github.com/msakuta/ruscal">GitHub</a>.</p>
 
     </body>
 </html>

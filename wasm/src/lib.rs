@@ -18,7 +18,7 @@ extern "C" {
   // pub(crate) fn wasm_set_fill_style(s: &str);
 }
 
-fn s_print(_: &dyn Any, args: &[Value]) -> Value {
+fn print_fn(_: &dyn Any, args: &[Value]) -> Value {
   let output = args.iter().map(|v| v.to_string()).fold(
     String::new(),
     |acc, cur| {
@@ -35,6 +35,18 @@ fn s_print(_: &dyn Any, args: &[Value]) -> Value {
   Value::I64(0)
 }
 
+fn dbg_fn(_: &dyn Any, values: &[Value]) -> Value {
+  wasm_print(&format!("dbg: {:?}\n", values[0]));
+  Value::I64(0)
+}
+
+fn puts_fn(_: &dyn Any, args: &[Value]) -> Value {
+  for arg in args {
+    wasm_print(&format!("{}", arg));
+  }
+  Value::F64(0.)
+}
+
 fn wasm_functions<'src>(
   mut set_fn: impl FnMut(&'static str, NativeFn<'src>),
 ) {
@@ -43,7 +55,23 @@ fn wasm_functions<'src>(
     NativeFn::new(
       vec![("arg", TypeDecl::Any)],
       TypeDecl::Any,
-      Box::new(s_print),
+      Box::new(print_fn),
+    ),
+  );
+  set_fn(
+    "dbg",
+    NativeFn::new(
+      vec![("arg", TypeDecl::Any)],
+      TypeDecl::Any,
+      Box::new(dbg_fn),
+    ),
+  );
+  set_fn(
+    "puts",
+    NativeFn::new(
+      vec![("arg", TypeDecl::Any)],
+      TypeDecl::Any,
+      Box::new(puts_fn),
     ),
   );
 }
