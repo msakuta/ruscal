@@ -125,11 +125,13 @@ Options:
 #[macro_export]
 macro_rules! dprintln {
     ($fmt:literal) => {
+        #[cfg(not(target_arch = "wasm32"))]
         if ::ruscal::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
             println!($fmt);
         }
     };
     ($fmt:literal, $($args:expr),*) => {
+        #[cfg(not(target_arch = "wasm32"))]
         if ::ruscal::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
             println!($fmt, $($args),*);
         }
