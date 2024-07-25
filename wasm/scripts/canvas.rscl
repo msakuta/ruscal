@@ -1,6 +1,7 @@
 
 for i in 0 to 10 {
     for j in 0 to 5 {
+        set_fill_style("#00" + hex_string(i * 255 / 10) + hex_string(j * 255 / 5));
         rectangle(10 + i * 30, 10 + j * 40, 20, 30);
     }
 }

@@ -76,6 +76,22 @@ fn set_fill_style_fn(_: &dyn Any, vals: &[Value]) -> Value {
   Value::I64(0)
 }
 
+fn hex_string_fn(_: &dyn Any, vals: &[Value]) -> Value {
+  if let [val, ..] = vals {
+    match val.coerce_i64() {
+      Ok(i) => Value::Str(format!("{:02x}", i)),
+      _ => {
+        wasm_print(
+          "hex_string() could not convert argument to i64",
+        );
+        Value::Str("".to_string())
+      }
+    }
+  } else {
+    Value::Str("".to_string())
+  }
+}
+
 fn wasm_functions<'src>(
   mut set_fn: impl FnMut(
     &'static str,
@@ -134,6 +150,16 @@ fn wasm_functions<'src>(
         vec![("s", TypeDecl::Str)],
         TypeDecl::Any,
         Box::new(set_fill_style_fn),
+      )
+    }),
+  );
+  set_fn(
+    "hex_string",
+    Box::new(|| {
+      NativeFn::new(
+        vec![("arg", TypeDecl::I64)],
+        TypeDecl::Str,
+        Box::new(hex_string_fn),
       )
     }),
   );
