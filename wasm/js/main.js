@@ -1,4 +1,4 @@
-import { type_check, run_script, parse_ast, compile, disasm, compile_and_run } from "../pkg/index.js";
+import { type_check, compile, disasm, compile_and_run } from "../pkg/index.js";
 
 
 async function runCommon(process) {
@@ -43,8 +43,8 @@ document.getElementById("clearCanvas").addEventListener("click", () => {
 });
 
 document.getElementById("input").value = `
-fn fact(n) {
-    if n < 1 {
+fn fact(n: i64) -> i64 {
+    if n < i64(1) {
         1
     } else {
         n * fact(n - 1)

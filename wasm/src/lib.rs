@@ -2,8 +2,9 @@ use std::{any::Any, rc::Rc};
 
 use ruscal::{
   ast::TypeDecl,
-  bytecode::{FnDecl, NativeFn},
-  file_io::{read_program, write_program},
+  bytecode::NativeFn,
+  file_io::{parse_program, read_program, write_program},
+  type_checker::{self, TypeCheckContext},
   value::Value,
   vm::{debugger, Vm, YieldResult},
   Args,
@@ -49,7 +50,19 @@ fn wasm_functions<'src>(
 
 #[wasm_bindgen]
 pub fn type_check(src: &str) -> Result<JsValue, JsValue> {
-  Ok(JsValue::from_str("Todo!"))
+  let stmts = parse_program("<input>", src).map_err(|e| {
+    JsValue::from_str(&format!("Parse Error: {e}"))
+  })?;
+
+  type_checker::type_check(
+    &stmts,
+    &mut TypeCheckContext::new(),
+  )
+  .map_err(|e| {
+    JsValue::from_str(&format!("Type Check Error: {e}"))
+  })?;
+
+  Ok(JsValue::from_str("Ok"))
 }
 
 #[wasm_bindgen]
