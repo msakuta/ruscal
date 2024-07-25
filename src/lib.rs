@@ -8,7 +8,9 @@ pub mod type_checker;
 pub mod value;
 pub mod vm;
 
-use std::sync::atomic::AtomicBool;
+use std::{collections::HashMap, sync::atomic::AtomicBool};
+
+use bytecode::NativeFn;
 
 pub enum RunMode {
   None,
@@ -25,6 +27,10 @@ pub struct Args {
   pub disasm: bool,
   pub show_ast: bool,
   pub debug_output: bool,
+  /// Because Args is passed as a shared reference, NativeFn can be requested to be generated multiple times.
+  /// Having a function to return one is an easy trick to allow it without breaking API.
+  pub additional_funcs:
+    HashMap<String, Box<dyn Fn() -> NativeFn<'static>>>,
 }
 
 impl Args {
@@ -36,6 +42,7 @@ impl Args {
       disasm: false,
       show_ast: false,
       debug_output: false,
+      additional_funcs: HashMap::new(),
     }
   }
 }
@@ -119,17 +126,20 @@ Options:
     disasm,
     show_ast,
     debug_output,
+    additional_funcs: HashMap::new(),
   })
 }
 
 #[macro_export]
 macro_rules! dprintln {
     ($fmt:literal) => {
+        #[cfg(not(target_arch = "wasm32"))]
         if ::ruscal::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
             println!($fmt);
         }
     };
     ($fmt:literal, $($args:expr),*) => {
+        #[cfg(not(target_arch = "wasm32"))]
         if ::ruscal::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
             println!($fmt, $($args),*);
         }

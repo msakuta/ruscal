@@ -246,8 +246,8 @@ impl Vm {
           let fname =
             &stack[stack.len() - instruction.arg0 as usize - 1];
           let Value::Str(fname) = fname else {
-                panic!("Function name shall be a string: {fname:?} in fn {:?}", self.top()?.stack);
-              };
+            panic!("Function name shall be a string: {fname:?} in fn {:?}", self.top()?.stack);
+          };
           let fn_def =
             self.bytecode.funcs.get(fname).ok_or_else(
               || {
@@ -342,8 +342,10 @@ impl Vm {
             .pop()
             .ok_or_else(|| "Stack underflow".to_string())?;
           let Value::Coro(vm) = vms else {
-              return Err("Await keyword applied to a non-coroutine".into());
-            };
+            return Err(
+              "Await keyword applied to a non-coroutine".into(),
+            );
+          };
           match vm.borrow_mut().interpret() {
             Ok(YieldResult::Finished(_)) => (),
             Ok(YieldResult::Suspend(value)) => {

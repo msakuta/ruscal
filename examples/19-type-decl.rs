@@ -21,7 +21,9 @@ use nom::{
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-  let Some(args) = parse_args(false) else { return Ok(()) };
+  let Some(args) = parse_args(false) else {
+    return Ok(());
+  };
 
   let src_file = args.source.as_ref().ok_or_else(|| {
     "Please specify source file to compile after -c"
