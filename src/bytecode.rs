@@ -454,4 +454,19 @@ impl ByteCode {
     self.funcs = funcs;
     Ok(())
   }
+
+  pub fn disasm(&self, writer: &mut impl Write) -> std::io::Result<()> {
+    for (fname, fn_def) in &self.funcs {
+      match fn_def {
+        FnDef::User(f) => {
+          writeln!(writer, "Function {}:", fname)?;
+          f.disasm(writer)?;
+        },
+        FnDef::Native(_) => {
+          writeln!(writer, "Function {}: <Native>", fname)?;
+        }
+      }
+    }
+    Ok(())
+  }
 }

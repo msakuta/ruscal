@@ -101,7 +101,33 @@ pub fn compile(src: &str) -> Result<Vec<u8>, JsValue> {
 
 #[wasm_bindgen]
 pub fn disasm(src: &str) -> Result<String, JsValue> {
-  Ok("Todo!".to_string())
+  let args = Args::new();
+  let mut buf = vec![];
+
+  write_program(
+    "<input>",
+    src,
+    &mut std::io::Cursor::new(&mut buf),
+    "<Memory>",
+    &args,
+  )
+  .map_err(|e| {
+    JsValue::from_str(&format!("Compile Error: {e}"))
+  })?;
+
+  let mut bytecode =
+    read_program(&mut std::io::Cursor::new(&mut buf))
+      .map_err(|e| JsValue::from(e.to_string()))?;
+
+  let mut dis_buf = vec![];
+  bytecode
+    .disasm(&mut dis_buf)
+    .map_err(|e| JsValue::from(e.to_string()))?;
+
+  Ok(
+    String::from_utf8(dis_buf)
+      .map_err(|e| JsValue::from(e.to_string()))?,
+  )
 }
 
 #[wasm_bindgen]
