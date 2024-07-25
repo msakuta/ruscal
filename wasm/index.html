@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <title>rusty-parser wasm</title>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style type="text/css">
+            body {
+                color: #000000;
+                text-align:center;
+
+                background-color: #f0f0f0;
+                margin: 0px;
+                width: 100%;
+            }
+            .code {
+                font-family:Monospace;
+                font-size:15px;
+            }
+            .justify {
+                text-align: justify;
+                padding: 2em;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>rusty-parser Wasm</h1>
+        <p>See the <a href="https://github.com/msakuta/rusty-parser/wiki">wiki</a> for syntax.</p>
+        <hr>
+        <div>
+            Samples: <span id="samples"></span>
+        </div>
+        <div class="code">
+            <textarea  id="input" type="text" cols="120" rows="20" ></textarea>
+        </div>
+
+        <div>
+            <button id="typeCheck">Type Check</button>
+            <button id="compile">Compile</button>
+            <button id="disasm">Disassemble</button>
+            <button id="compileAndRun">Compile & Run</button>
+        </div>
+
+        <div id="timeMessage"></div>
+        <div class="code">
+            <textarea  id="output" type="text" readonly cols="120"  rows="20" ></textarea>
+        </div>
+
+        <h2>Canvas:</h2>
+        <div><button id="clearCanvas">Clear</button></div>
+        <canvas id="canvas" width="320" height="320" style="border: solid 1px black"> </canvas>
+
+        <div class="justify">
+            <h2>Data types</h2>
+            You can declare a type for a variable or function arguments in a syntax like <tt>a: type</tt>
+            or <tt>fn f(a: type) -> type</tt>.
+            <tt>type</tt> can be one of:
+            <ul>
+                <li>f64</li>
+                <li>f32</li>
+                <li>i64</li>
+                <li>i32</li>
+                <li>str</li>
+                <li>[type] - declares an array of some other types. Can be nested like <tt>[[i32]]</tt>.</li>
+            </ul>
+
+            Note that the language is still dynamically typed (although type checker can be run statically),
+            so the type coercion only happens when you assign a value to a typed variable or typed function argument.
+
+            <h2>Built-in functions</h2>
+            As an experimental language, it has only few Built-in functions.
+
+            <ul>
+            <li>print(s, ...) - Prints arguments to the output and a newline.</li>
+            <li>puts(s, ...) - Prints arguments without a newline.</li>
+            <li>type(obj) -> str - Returns a string representing type of given object.</li>
+            <li>len(a: [any]) -> i64 - Returns length of a given array.</li>
+            <li>push(a: [any], val: any) - Puts an element at the end of the array, expanding its length by 1.</li>
+            <li>hex_string(value: i64) - Converts an integer to 2-digit hexadecimal representation string.</li>
+            <li>set_fill_style(style) - Sets style for painting on the canvas.</li>
+            <li>rectangle(x: i64, y: i64, width: i64, height: i64) - Draws a filled rectangle on the canvas.</li>
+            </ul>
+
+            <h2 id="Time">Time measurement resolution</h2>
+            Due to security reasons, your browser may have reduced time resolution for measurement.
+            It is typically 0.1ms or 1ms, but can be larger.
+            Please be aware that the lower digits may be always 0 because of this rounding.
+            See <a href="https://developer.mozilla.org/en-US/docs/Web/API/Performance/now#reduced_time_precision">this page</a> for details.
+        </div>
+
+        <hr>
+        <p>Source on <a href="https://github.com/msakuta/rusty-parser">GitHub</a>.</p>
+
+    </body>
+</html>
