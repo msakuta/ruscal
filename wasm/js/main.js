@@ -57,6 +57,7 @@ print(fact(10));
 const samples = document.getElementById("samples");
 
 [
+    "fact.rscl",
     "for.rscl",
     "type.rscl",
 ]
