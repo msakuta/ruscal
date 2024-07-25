@@ -11,7 +11,6 @@ pub mod vm;
 use std::{collections::HashMap, sync::atomic::AtomicBool};
 
 use bytecode::NativeFn;
-use value::Value;
 
 pub enum RunMode {
   None,

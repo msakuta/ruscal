@@ -26,6 +26,7 @@ struct InstPtr(usize);
 enum Target {
   #[default]
   Temp,
+  #[allow(dead_code)]
   Literal(usize),
   Local(String),
 }
