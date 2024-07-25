@@ -42,7 +42,12 @@ pub fn write_program(
     println!("AST: {stmts:#?}");
   }
 
-  match type_check(&stmts, &mut TypeCheckContext::new()) {
+  let mut tc_ctx = TypeCheckContext::new();
+  for (fname, f) in &args.additional_funcs {
+    tc_ctx.add_fn(fname.clone(), f());
+  }
+
+  match type_check(&stmts, &mut tc_ctx) {
     Ok(_) => println!("Typecheck Ok"),
     Err(e) => {
       return Err(

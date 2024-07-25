@@ -1,0 +1,6 @@
+
+for i in 0 to 10 {
+    for j in 0 to 5 {
+        rectangle(10 + i * 30, 10 + j * 40, 20, 30);
+    }
+}

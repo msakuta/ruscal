@@ -14,8 +14,13 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(module = "/wasm_api.js")]
 extern "C" {
   pub(crate) fn wasm_print(s: &str);
-  // pub(crate) fn wasm_rectangle(x0: i32, y0: i32, x1: i32, y1: i32);
-  // pub(crate) fn wasm_set_fill_style(s: &str);
+  pub(crate) fn wasm_rectangle(
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+  );
+  pub(crate) fn wasm_set_fill_style(s: &str);
 }
 
 fn print_fn(_: &dyn Any, args: &[Value]) -> Value {
@@ -47,32 +52,90 @@ fn puts_fn(_: &dyn Any, args: &[Value]) -> Value {
   Value::F64(0.)
 }
 
+fn rectangle_fn(_: &dyn Any, args: &[Value]) -> Value {
+  let mut f64vals = args.iter().take(4).map(|val| {
+    if let Ok(v) = val.coerce_f64() {
+      Ok(v)
+    } else {
+      Err("wrong type!".to_string())
+    }
+  });
+  let short = "Input needs to be more than 4 values";
+  let x0 = f64vals.next().expect(short).unwrap();
+  let y0 = f64vals.next().expect(short).unwrap();
+  let x1 = f64vals.next().expect(short).unwrap();
+  let y1 = f64vals.next().expect(short).unwrap();
+  wasm_rectangle(x0, y0, x1, y1);
+  Value::I64(0)
+}
+
+fn set_fill_style_fn(_: &dyn Any, vals: &[Value]) -> Value {
+  if let [Value::Str(s), ..] = vals {
+    wasm_set_fill_style(s);
+  }
+  Value::I64(0)
+}
+
 fn wasm_functions<'src>(
-  mut set_fn: impl FnMut(&'static str, NativeFn<'src>),
+  mut set_fn: impl FnMut(
+    &'static str,
+    Box<dyn Fn() -> NativeFn<'src>>,
+  ),
 ) {
   set_fn(
     "print",
-    NativeFn::new(
-      vec![("arg", TypeDecl::Any)],
-      TypeDecl::Any,
-      Box::new(print_fn),
-    ),
+    Box::new(|| {
+      NativeFn::new(
+        vec![("arg", TypeDecl::Any)],
+        TypeDecl::Any,
+        Box::new(print_fn),
+      )
+    }),
   );
   set_fn(
     "dbg",
-    NativeFn::new(
-      vec![("arg", TypeDecl::Any)],
-      TypeDecl::Any,
-      Box::new(dbg_fn),
-    ),
+    Box::new(|| {
+      NativeFn::new(
+        vec![("arg", TypeDecl::Any)],
+        TypeDecl::Any,
+        Box::new(dbg_fn),
+      )
+    }),
   );
   set_fn(
     "puts",
-    NativeFn::new(
-      vec![("arg", TypeDecl::Any)],
-      TypeDecl::Any,
-      Box::new(puts_fn),
-    ),
+    Box::new(|| {
+      NativeFn::new(
+        vec![("arg", TypeDecl::Any)],
+        TypeDecl::Any,
+        Box::new(puts_fn),
+      )
+    }),
+  );
+  set_fn(
+    "rectangle",
+    Box::new(|| {
+      NativeFn::new(
+        vec![
+          ("x0", TypeDecl::F64),
+          ("y0", TypeDecl::F64),
+          ("x1", TypeDecl::F64),
+          ("y1", TypeDecl::F64),
+        ],
+        TypeDecl::Any,
+        Box::new(rectangle_fn),
+      )
+    }),
+  );
+  set_fn(
+    "set_fill_style",
+    Box::new(|| {
+      NativeFn::new(
+        vec![("s", TypeDecl::Str)],
+        TypeDecl::Any,
+        Box::new(set_fill_style_fn),
+      )
+    }),
   );
 }
 
@@ -82,20 +145,29 @@ pub fn type_check(src: &str) -> Result<JsValue, JsValue> {
     JsValue::from_str(&format!("Parse Error: {e}"))
   })?;
 
-  type_checker::type_check(
-    &stmts,
-    &mut TypeCheckContext::new(),
-  )
-  .map_err(|e| {
-    JsValue::from_str(&format!("Type Check Error: {e}"))
-  })?;
+  let mut tc_ctx = TypeCheckContext::new();
+
+  wasm_functions(|fname, f| {
+    tc_ctx.add_fn(fname.to_string(), f())
+  });
+
+  type_checker::type_check(&stmts, &mut tc_ctx).map_err(
+    |e| JsValue::from_str(&format!("Type Check Error: {e}")),
+  )?;
 
   Ok(JsValue::from_str("Ok"))
 }
 
 #[wasm_bindgen]
 pub fn compile(src: &str) -> Result<Vec<u8>, JsValue> {
-  let args = Args::new();
+  let mut args = Args::new();
+
+  wasm_functions(|fname, f| {
+    args
+      .additional_funcs
+      .insert(fname.to_string(), Box::new(move || f()));
+  });
+
   let mut buf = vec![];
 
   write_program(
@@ -114,7 +186,14 @@ pub fn compile(src: &str) -> Result<Vec<u8>, JsValue> {
 
 #[wasm_bindgen]
 pub fn disasm(src: &str) -> Result<String, JsValue> {
-  let args = Args::new();
+  let mut args = Args::new();
+
+  wasm_functions(|fname, f| {
+    args
+      .additional_funcs
+      .insert(fname.to_string(), Box::new(move || f()));
+  });
+
   let mut buf = vec![];
 
   write_program(
@@ -145,7 +224,14 @@ pub fn disasm(src: &str) -> Result<String, JsValue> {
 
 #[wasm_bindgen]
 pub fn compile_and_run(src: &str) -> Result<(), JsValue> {
-  let args = Args::new();
+  let mut args = Args::new();
+
+  wasm_functions(|fname, f| {
+    args
+      .additional_funcs
+      .insert(fname.to_string(), Box::new(move || f()));
+  });
+
   let mut buf = vec![];
 
   write_program(
@@ -164,7 +250,7 @@ pub fn compile_and_run(src: &str) -> Result<(), JsValue> {
       .map_err(|e| JsValue::from(e.to_string()))?;
 
   wasm_functions(|name, f| {
-    bytecode.add_fn(name.to_string(), f)
+    bytecode.add_fn(name.to_string(), f())
   });
 
   let mut vm = Vm::new(Rc::new(bytecode), Box::new(()), false);

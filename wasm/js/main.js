@@ -60,6 +60,7 @@ const samples = document.getElementById("samples");
     "fact.rscl",
     "for.rscl",
     "type.rscl",
+    "canvas.rscl",
 ]
     .forEach(fileName => {
     const link = document.createElement("a");
