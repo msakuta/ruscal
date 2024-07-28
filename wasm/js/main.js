@@ -62,6 +62,7 @@ const samples = document.getElementById("samples");
     "for.rscl",
     "nested_for.rscl",
     "type.rscl",
+    "coroutine.rscl",
     "canvas.rscl",
 ]
     .forEach(fileName => {

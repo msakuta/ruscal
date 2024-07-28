@@ -1,0 +1,18 @@
+
+cofn coro() -> i64 {
+    print("Hello");
+
+    yield 123;
+
+    print("World");
+
+    yield 321;
+}
+
+var co: cofn = coro();
+
+print(await co);
+
+print("Awaited a coroutine");
+
+print(await co);
