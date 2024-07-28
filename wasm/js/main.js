@@ -60,6 +60,7 @@ const samples = document.getElementById("samples");
     "fact.rscl",
     "fibonacci.rscl",
     "for.rscl",
+    "nested_for.rscl",
     "type.rscl",
     "canvas.rscl",
 ]
