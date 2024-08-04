@@ -36,7 +36,7 @@ fn print_fn(_: &dyn Any, args: &[Value]) -> Value {
   );
   wasm_print(&output);
 
-  wasm_print(&format!("\n"));
+  wasm_print("\n");
   Value::I64(0)
 }
 
@@ -191,7 +191,7 @@ pub fn compile(src: &str) -> Result<Vec<u8>, JsValue> {
   wasm_functions(|fname, f| {
     args
       .additional_funcs
-      .insert(fname.to_string(), Box::new(move || f()));
+      .insert(fname.to_string(), Box::new(f));
   });
 
   let mut buf = vec![];
@@ -217,7 +217,7 @@ pub fn disasm(src: &str) -> Result<String, JsValue> {
   wasm_functions(|fname, f| {
     args
       .additional_funcs
-      .insert(fname.to_string(), Box::new(move || f()));
+      .insert(fname.to_string(), Box::new(f));
   });
 
   let mut buf = vec![];
@@ -246,10 +246,8 @@ pub fn disasm(src: &str) -> Result<String, JsValue> {
     .disasm(&mut dis_buf)
     .map_err(|e| JsValue::from(e.to_string()))?;
 
-  Ok(
-    String::from_utf8(dis_buf)
-      .map_err(|e| JsValue::from(e.to_string()))?,
-  )
+  String::from_utf8(dis_buf)
+    .map_err(|e| JsValue::from(e.to_string()))
 }
 
 #[wasm_bindgen]
@@ -259,7 +257,7 @@ pub fn compile_and_run(src: &str) -> Result<(), JsValue> {
   wasm_functions(|fname, f| {
     args
       .additional_funcs
-      .insert(fname.to_string(), Box::new(move || f()));
+      .insert(fname.to_string(), Box::new(f));
   });
 
   let mut buf = vec![];
@@ -296,10 +294,10 @@ pub fn compile_and_run(src: &str) -> Result<(), JsValue> {
         println!(
           "Execution suspended with a yielded value {value}"
         );
-        if value == Value::Str("break".to_string()) {
-          if debugger(&vm) {
-            break;
-          }
+        if value == Value::Str("break".to_string())
+          && debugger(&vm)
+        {
+          break;
         }
       }
       Err(e) => {
