@@ -145,11 +145,11 @@ impl Vm {
     let top_frame = self
       .stack_frames
       .pop()
-      .ok_or_else(|| "Stack frame underflow at Ret")?;
+      .ok_or("Stack frame underflow at Ret")?;
     let res = top_frame
       .stack
       .get(top_frame.stack.len() - stack_pos as usize - 1)
-      .ok_or_else(|| "Stack underflow at Ret")?
+      .ok_or("Stack underflow at Ret")?
       .clone();
     let args = top_frame.args;
 

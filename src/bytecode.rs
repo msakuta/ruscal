@@ -348,7 +348,7 @@ fn unary_fn<'a>(f: fn(f64) -> f64) -> FnDecl<'a> {
     ret_type: TypeDecl::F64,
     code: Box::new(move |_, args| {
       Value::F64(f(args
-        .into_iter()
+        .iter()
         .next()
         .expect("function missing argument")
         .coerce_f64()
@@ -362,7 +362,7 @@ fn binary_fn<'a>(f: fn(f64, f64) -> f64) -> FnDecl<'a> {
     args: vec![("lhs", TypeDecl::F64), ("rhs", TypeDecl::F64)],
     ret_type: TypeDecl::F64,
     code: Box::new(move |_, args| {
-      let mut args = args.into_iter();
+      let mut args = args.iter();
       let lhs = args
         .next()
         .expect("function missing the first argument")
@@ -382,7 +382,7 @@ fn print_fn(_: &dyn Any, args: &[Value]) -> Value {
   for arg in args {
     print!("{} ", arg);
   }
-  println!("");
+  println!();
   Value::F64(0.)
 }
 
@@ -399,7 +399,7 @@ fn puts_fn(_: &dyn Any, args: &[Value]) -> Value {
 }
 
 fn type_fn(_: &dyn Any, args: &[Value]) -> Value {
-  Value::Str(match args.get(0) {
+  Value::Str(match args.first() {
     Some(value) => match value {
       Value::I64(_) => "I64".to_string(),
       Value::F64(_) => "F64".to_string(),
@@ -412,6 +412,12 @@ fn type_fn(_: &dyn Any, args: &[Value]) -> Value {
 
 pub struct ByteCode {
   pub(crate) funcs: HashMap<String, FnDef>,
+}
+
+impl Default for ByteCode {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ByteCode {

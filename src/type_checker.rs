@@ -14,6 +14,12 @@ pub struct TypeCheckContext<'src, 'ctx> {
   super_context: Option<&'ctx TypeCheckContext<'src, 'ctx>>,
 }
 
+impl<'src, 'ctx> Default for TypeCheckContext<'src, 'ctx> {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 impl<'src, 'ctx> TypeCheckContext<'src, 'ctx> {
   pub fn new() -> Self {
     Self {
@@ -32,11 +38,7 @@ impl<'src, 'ctx> TypeCheckContext<'src, 'ctx> {
   }
 
   fn get_var(&self, name: &str) -> Option<TypeDecl> {
-    if let Some(val) = self.vars.get(name) {
-      Some(val.clone())
-    } else {
-      None
-    }
+    self.vars.get(name).copied()
   }
 
   fn get_fn(&self, name: &str) -> Option<&FnDecl<'src>> {
@@ -95,8 +97,8 @@ fn tc_coerce_type<'src>(
 ) -> Result<TypeDecl, TypeCheckError<'src>> {
   use TypeDecl::*;
   Ok(match (value, target) {
-    (_, Any) => value.clone(),
-    (Any, _) => target.clone(),
+    (_, Any) => *value,
+    (Any, _) => *target,
     (F64 | I64, F64) => F64,
     (F64, I64) => F64,
     (I64, I64) => I64,
@@ -204,16 +206,16 @@ fn tc_expr<'src>(
       for ((arg_ty, arg_span), decl) in
         args_ty.iter().zip(args_decl.iter())
       {
-        tc_coerce_type(&arg_ty, &decl.1, *arg_span)?;
+        tc_coerce_type(arg_ty, &decl.1, *arg_span)?;
       }
       func.ret_type()
     }
-    Add(lhs, rhs) => tc_binary_op(&lhs, &rhs, ctx, "Add")?,
-    Sub(lhs, rhs) => tc_binary_op(&lhs, &rhs, ctx, "Sub")?,
-    Mul(lhs, rhs) => tc_binary_op(&lhs, &rhs, ctx, "Mult")?,
-    Div(lhs, rhs) => tc_binary_op(&lhs, &rhs, ctx, "Div")?,
-    Lt(lhs, rhs) => tc_binary_cmp(&lhs, &rhs, ctx, "LT")?,
-    Gt(lhs, rhs) => tc_binary_cmp(&lhs, &rhs, ctx, "GT")?,
+    Add(lhs, rhs) => tc_binary_op(lhs, rhs, ctx, "Add")?,
+    Sub(lhs, rhs) => tc_binary_op(lhs, rhs, ctx, "Sub")?,
+    Mul(lhs, rhs) => tc_binary_op(lhs, rhs, ctx, "Mult")?,
+    Div(lhs, rhs) => tc_binary_op(lhs, rhs, ctx, "Div")?,
+    Lt(lhs, rhs) => tc_binary_cmp(lhs, rhs, ctx, "LT")?,
+    Gt(lhs, rhs) => tc_binary_cmp(lhs, rhs, ctx, "GT")?,
     If(cond, true_branch, false_branch) => {
       tc_coerce_type(
         &tc_expr(cond, ctx)?,
@@ -289,10 +291,10 @@ pub fn type_check<'src>(
           subctx.vars.insert(arg, *ty);
         }
         let last_stmt = type_check(stmts, &mut subctx)?;
-        tc_coerce_type(&last_stmt, &ret_type, stmts.span())?;
+        tc_coerce_type(&last_stmt, ret_type, stmts.span())?;
       }
       Statement::Expression(e) => {
-        res = tc_expr(&e, ctx)?;
+        res = tc_expr(e, ctx)?;
       }
       Statement::For {
         loop_var,

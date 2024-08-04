@@ -27,10 +27,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
           println!(
             "Execution suspended with a yielded value {value}"
           );
-          if value == Value::Str("break".to_string()) {
-            if debugger(&vm) {
-              break;
-            }
+          if value == Value::Str("break".to_string())
+            && debugger(&vm)
+          {
+            break;
           }
         }
         Err(e) => {

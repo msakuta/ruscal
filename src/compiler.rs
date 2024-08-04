@@ -69,6 +69,12 @@ pub struct Compiler {
   loop_stack: Vec<LoopFrame>,
 }
 
+impl Default for Compiler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Compiler {
   pub fn new() -> Self {
     Self {
@@ -330,7 +336,7 @@ impl Compiler {
           .target_stack
           .resize(stack_size_before, Target::Temp);
         if let Some(false_branch) = false_branch.as_ref() {
-          self.compile_stmts_or_zero(&false_branch)?;
+          self.compile_stmts_or_zero(false_branch)?;
         }
         self.coerce_stack(StkIdx(stack_size_before + 1));
         self.fixup_jmp(jmp_inst);

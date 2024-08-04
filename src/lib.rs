@@ -47,6 +47,12 @@ impl Args {
   }
 }
 
+impl Default for Args {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
 
 pub fn parse_args(compilable: bool) -> Option<Args> {
