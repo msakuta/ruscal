@@ -1,0 +1,9 @@
+fn fact(n: i64) -> i64 {
+    if n < i64(1) {
+        1
+    } else {
+        n * fact(n - 1)
+    }
+}
+
+print(fact(10));

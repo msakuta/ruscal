@@ -1,0 +1,12 @@
+
+fn fibo(n: i64) -> i64 {
+    if n < i64(1) {
+        0
+    } else if n < i64(2) {
+        1
+    } else {
+        fibo(n - 1) + fibo(n - 2)
+    };
+}
+
+print(fibo(10));
