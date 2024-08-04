@@ -70,9 +70,9 @@ pub struct Compiler {
 }
 
 impl Default for Compiler {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl Compiler {
@@ -371,13 +371,18 @@ impl Compiler {
   /// Coerce the stack size to be target + 1, and move the old top
   /// to the new top.
   fn coerce_stack(&mut self, target: StkIdx) {
-    if target.0 < self.target_stack.len() - 1 {
-      self.add_store_inst(target);
-      self.add_pop_until_inst(target);
-    } else if self.target_stack.len() - 1 < target.0 {
-      for _ in self.target_stack.len() - 1..target.0 {
-        self.add_copy_inst(self.stack_top());
+    use std::cmp::Ordering;
+    match target.0.cmp(&(self.target_stack.len() - 1)) {
+      Ordering::Less => {
+        self.add_store_inst(target);
+        self.add_pop_until_inst(target);
       }
+      Ordering::Greater => {
+        for _ in self.target_stack.len() - 1..target.0 {
+          self.add_copy_inst(self.stack_top());
+        }
+      }
+      _ => {}
     }
   }
 

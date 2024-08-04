@@ -218,17 +218,20 @@ impl<'src> UserFn<'src> {
   }
 }
 
+pub(crate) type NativeFnClosure =
+  Box<dyn Fn(&dyn Any, &[Value]) -> Value>;
+
 pub struct NativeFn<'src> {
   args: Vec<(&'src str, TypeDecl)>,
   ret_type: TypeDecl,
-  pub(crate) code: Box<dyn Fn(&dyn Any, &[Value]) -> Value>,
+  pub(crate) code: NativeFnClosure,
 }
 
 impl<'src> NativeFn<'src> {
   pub fn new(
     args: Vec<(&'src str, TypeDecl)>,
     ret_type: TypeDecl,
-    code: Box<dyn Fn(&dyn Any, &[Value]) -> Value>,
+    code: NativeFnClosure,
   ) -> Self {
     Self {
       args,
@@ -415,9 +418,9 @@ pub struct ByteCode {
 }
 
 impl Default for ByteCode {
-    fn default() -> Self {
-        Self::new()
-    }
+  fn default() -> Self {
+    Self::new()
+  }
 }
 
 impl ByteCode {
