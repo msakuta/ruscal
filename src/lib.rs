@@ -111,7 +111,8 @@ pub fn parse_args(compilable: bool) -> Option<Args> {
     -o file  Specify output file
     -r       Run bytecode
     -R       Compile and run
-    -d       Disassemble compiled code"#
+    -d       Disassemble compiled code
+    -O       Optimize code by constant folding/propagation"#
     } else {
       ""
     };
