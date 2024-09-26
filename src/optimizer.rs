@@ -21,6 +21,9 @@ pub fn optimize(ast: &mut Statements) -> Result<(), String> {
         optim_expr(ex, &constants)?;
         if let Some(ex) = const_expr(ex, &constants) {
           constants.insert(name.to_string(), ex);
+        } else {
+          // If the variable was assigned a non-constant, it should be removed from known constants.
+          constants.remove(**name);
         }
       }
       _ => {}
