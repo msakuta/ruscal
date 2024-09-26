@@ -4,7 +4,7 @@ a = 40 + 2;
 print(a * 1);
 
 fn non_const() -> f64 {
-    96
+    90 + 6
 }
 
 a = non_const();

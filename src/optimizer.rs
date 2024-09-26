@@ -7,17 +7,18 @@ use crate::ast::{
 type Constants<'a> = HashMap<String, Expression<'a>>;
 
 pub fn optimize(ast: &mut Statements) -> Result<(), String> {
+  use Statement::*;
   let mut constants = Constants::new();
   for stmt in ast {
     match stmt {
-      Statement::Expression(ex) => optim_expr(ex, &constants)?,
-      Statement::VarDef { name, ex, .. } => {
+      Expression(ex) => optim_expr(ex, &constants)?,
+      VarDef { name, ex, .. } => {
         optim_expr(ex, &constants)?;
         if let Some(ex) = const_expr(ex, &constants) {
           constants.insert(name.to_string(), ex);
         }
       }
-      Statement::VarAssign { name, ex, .. } => {
+      VarAssign { name, ex, .. } => {
         optim_expr(ex, &constants)?;
         if let Some(ex) = const_expr(ex, &constants) {
           constants.insert(name.to_string(), ex);
@@ -26,10 +27,34 @@ pub fn optimize(ast: &mut Statements) -> Result<(), String> {
           constants.remove(**name);
         }
       }
-      _ => {}
+      For { stmts, .. } => {
+        // Variables assigned in a loop is generally not a constant, so let's remove them.
+        check_assigned(stmts, &mut constants);
+      }
+      FnDef { stmts, .. } => optimize(stmts)?,
+      Return(ex) | Statement::Yield(ex) => {
+        optim_expr(ex, &constants)?;
+      }
+      Break | Continue => {}
     }
   }
   Ok(())
+}
+
+fn check_assigned(
+  stmts: &[Statement],
+  constants: &mut Constants,
+) {
+  for stmt in stmts {
+    match stmt {
+      Statement::VarAssign { name, ex, .. } => {
+        if const_expr(ex, constants).is_none() {
+          constants.remove(**name);
+        }
+      }
+      _ => {}
+    }
+  }
 }
 
 fn optim_expr<'a>(
