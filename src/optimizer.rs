@@ -17,8 +17,11 @@ pub fn optimize(ast: &mut Statements) -> Result<(), String> {
           constants.insert(name.to_string(), ex);
         }
       }
-      Statement::VarAssign { ex, .. } => {
-        optim_expr(ex, &constants)?
+      Statement::VarAssign { name, ex, .. } => {
+        optim_expr(ex, &constants)?;
+        if let Some(ex) = const_expr(ex, &constants) {
+          constants.insert(name.to_string(), ex);
+        }
       }
       _ => {}
     }
