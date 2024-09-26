@@ -24,16 +24,51 @@ fn optim_expr(expr: &mut Expression) -> Result<(), String> {
 fn const_expr<'a>(
   expr: &Expression<'a>,
 ) -> Option<Expression<'a>> {
-  Some(match &expr.expr {
-    ExprEnum::NumLiteral(_) => expr.clone(),
-    ExprEnum::StrLiteral(_) => expr.clone(),
+  match &expr.expr {
+    ExprEnum::NumLiteral(_) => Some(expr.clone()),
+    ExprEnum::StrLiteral(_) => Some(expr.clone()),
     ExprEnum::Add(lhs, rhs) => optim_bin_op(
       |lhs, rhs| lhs + rhs,
-      |lhs, rhs| lhs.to_owned() + rhs,
+      |lhs: &str, rhs: &str| Some(lhs.to_owned() + rhs),
       lhs,
       rhs,
       expr.span,
-    )?,
+    ),
+    ExprEnum::Sub(lhs, rhs) => optim_bin_op(
+      |lhs, rhs| lhs - rhs,
+      |_, _| None,
+      lhs,
+      rhs,
+      expr.span,
+    ),
+    ExprEnum::Mul(lhs, rhs) => optim_bin_op(
+      |lhs, rhs| lhs * rhs,
+      |_, _| None,
+      lhs,
+      rhs,
+      expr.span,
+    ),
+    ExprEnum::Div(lhs, rhs) => optim_bin_op(
+      |lhs, rhs| lhs * rhs,
+      |_, _| None,
+      lhs,
+      rhs,
+      expr.span,
+    ),
+    ExprEnum::Gt(lhs, rhs) => optim_bin_op(
+      |lhs, rhs| (lhs > rhs) as i32 as f64,
+      |_, _| None,
+      lhs,
+      rhs,
+      expr.span,
+    ),
+    ExprEnum::Lt(lhs, rhs) => optim_bin_op(
+      |lhs, rhs| (lhs < rhs) as i32 as f64,
+      |_, _| None,
+      lhs,
+      rhs,
+      expr.span,
+    ),
     ExprEnum::FnInvoke(span, args) => {
       let args = args
         .iter()
@@ -41,18 +76,18 @@ fn const_expr<'a>(
           const_expr(arg).unwrap_or_else(|| arg.clone())
         })
         .collect();
-      Expression::new(
+      Some(Expression::new(
         ExprEnum::FnInvoke(*span, args),
         expr.span,
-      )
+      ))
     }
-    _ => return None,
-  })
+    _ => None,
+  }
 }
 
 fn optim_bin_op<'a>(
   op_num: impl Fn(f64, f64) -> f64,
-  op_str: impl Fn(&str, &str) -> String,
+  op_str: impl Fn(&str, &str) -> Option<String>,
   lhs: &Expression<'a>,
   rhs: &Expression<'a>,
   span: Span<'a>,
@@ -65,9 +100,8 @@ fn optim_bin_op<'a>(
       (NumLiteral(lhs), NumLiteral(rhs)) => Some(
         Expression::new(NumLiteral(op_num(*lhs, *rhs)), span),
       ),
-      (StrLiteral(lhs), StrLiteral(rhs)) => Some(
-        Expression::new(StrLiteral(op_str(lhs, rhs)), span),
-      ),
+      (StrLiteral(lhs), StrLiteral(rhs)) => op_str(lhs, rhs)
+        .map(|ex| Expression::new(StrLiteral(ex), span)),
       _ => None,
     }
   } else {
