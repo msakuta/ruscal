@@ -3,6 +3,7 @@ pub mod bytecode;
 pub mod compiler;
 pub mod file_io;
 mod instructions;
+pub mod optimizer;
 pub mod parser;
 pub mod type_checker;
 pub mod value;
@@ -26,6 +27,7 @@ pub struct Args {
   pub output: String,
   pub disasm: bool,
   pub show_ast: bool,
+  pub optimize: bool,
   pub debug_output: bool,
   /// Because Args is passed as a shared reference, NativeFn can be requested to be generated multiple times.
   /// Having a function to return one is an easy trick to allow it without breaking API.
@@ -41,6 +43,7 @@ impl Args {
       output: "".to_string(),
       disasm: false,
       show_ast: false,
+      optimize: false,
       debug_output: false,
       additional_funcs: HashMap::new(),
     }
@@ -61,6 +64,7 @@ pub fn parse_args(compilable: bool) -> Option<Args> {
   let mut output = None;
   let mut disasm = false;
   let mut show_ast = false;
+  let mut optimize = false;
   let mut show_help = false;
   let mut args_is_empty = true;
   let mut debug_output = false;
@@ -73,6 +77,7 @@ pub fn parse_args(compilable: bool) -> Option<Args> {
       "-h" => show_help = true,
       "-c" => run_mode = RunMode::Compile,
       "-o" => output = args.next(),
+      "-O" => optimize = true,
       "-r" => {
         let bytecode = args
           .next()
@@ -131,6 +136,7 @@ Options:
       .unwrap_or_else(|| "bytecode.bin".to_string()),
     disasm,
     show_ast,
+    optimize,
     debug_output,
     additional_funcs: HashMap::new(),
   })

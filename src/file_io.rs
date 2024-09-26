@@ -7,6 +7,7 @@ use crate::{
   ast::{Span, Statements},
   bytecode::ByteCode,
   compiler::Compiler,
+  optimizer::optimize,
   parser::statements_finish,
   type_checker::{type_check, TypeCheckContext},
   Args, RunMode,
@@ -36,10 +37,17 @@ pub fn write_program(
   args: &Args,
 ) -> Result<(), Box<dyn std::error::Error>> {
   let mut compiler = Compiler::new();
-  let stmts = parse_program(source_file, source)?;
+  let mut stmts = parse_program(source_file, source)?;
 
   if args.show_ast {
     println!("AST: {stmts:#?}");
+  }
+
+  if args.optimize {
+    optimize(&mut stmts)?;
+    if args.show_ast {
+      println!("AST after optimization: {stmts:#?}");
+    }
   }
 
   let mut tc_ctx = TypeCheckContext::new();
