@@ -27,6 +27,7 @@ pub struct Args {
   pub output: String,
   pub disasm: bool,
   pub show_ast: bool,
+  pub show_debug_ast: bool,
   pub optimize: bool,
   pub debug_output: bool,
   /// Because Args is passed as a shared reference, NativeFn can be requested to be generated multiple times.
@@ -43,6 +44,7 @@ impl Args {
       output: "".to_string(),
       disasm: false,
       show_ast: false,
+      show_debug_ast: false,
       optimize: false,
       debug_output: false,
       additional_funcs: HashMap::new(),
@@ -64,6 +66,7 @@ pub fn parse_args(compilable: bool) -> Option<Args> {
   let mut output = None;
   let mut disasm = false;
   let mut show_ast = false;
+  let mut show_debug_ast = false;
   let mut optimize = false;
   let mut show_help = false;
   let mut args_is_empty = true;
@@ -87,6 +90,7 @@ pub fn parse_args(compilable: bool) -> Option<Args> {
       "-R" => run_mode = RunMode::CompileAndRun,
       "-d" => disasm = true,
       "-a" => show_ast = true,
+      "-A" => show_debug_ast = true,
       "-t" => run_mode = RunMode::TypeCheck,
       "-D" => {
         DEBUG.store(true, std::sync::atomic::Ordering::Relaxed);
@@ -112,7 +116,9 @@ pub fn parse_args(compilable: bool) -> Option<Args> {
     -r       Run bytecode
     -R       Compile and run
     -d       Disassemble compiled code
-    -O       Optimize code by constant folding/propagation"#
+    -O       Optimize code by constant folding/propagation
+    -a       Show parsed AST
+    -A       Show parsed AST in debug form"#
     } else {
       ""
     };
@@ -137,6 +143,7 @@ Options:
       .unwrap_or_else(|| "bytecode.bin".to_string()),
     disasm,
     show_ast,
+    show_debug_ast,
     optimize,
     debug_output,
     additional_funcs: HashMap::new(),

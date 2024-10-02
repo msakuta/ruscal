@@ -62,7 +62,6 @@ fn optim_expr<'a>(
   constants: &Constants<'a>,
 ) -> Result<(), String> {
   if let Some(val) = const_expr(expr, constants) {
-    println!("optim const_expr: {val:?}");
     *expr = val;
   }
   Ok(())

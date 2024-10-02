@@ -98,3 +98,198 @@ impl<'src> Statement<'src> {
 }
 
 pub type Statements<'a> = Vec<Statement<'a>>;
+
+impl std::fmt::Display for TypeDecl {
+  fn fmt(
+    &self,
+    f: &mut std::fmt::Formatter<'_>,
+  ) -> std::fmt::Result {
+    match self {
+      TypeDecl::Any => write!(f, "any"),
+      TypeDecl::F64 => write!(f, "f64"),
+      TypeDecl::I64 => write!(f, "i64"),
+      TypeDecl::Str => write!(f, "str"),
+      TypeDecl::Coro => write!(f, "coro"),
+    }
+  }
+}
+
+impl<'a> Expression<'a> {
+  fn format(
+    &self,
+    level: usize,
+    f: &mut impl std::io::Write,
+  ) -> std::io::Result<()> {
+    let indent = "  ".repeat(level);
+    match &self.expr {
+      ExprEnum::Ident(span) => write!(f, "{span}"),
+      ExprEnum::NumLiteral(val) => write!(f, "{val}"),
+      ExprEnum::StrLiteral(val) => write!(f, "{val:?}"),
+      ExprEnum::FnInvoke(name, args) => {
+        write!(f, "{name}(")?;
+        for (i, arg) in args.iter().enumerate() {
+          if i == 0 {
+            arg.format(level, f)?;
+          } else {
+            write!(f, ", ")?;
+            arg.format(level, f)?;
+          }
+        }
+        write!(f, ")")
+      }
+      ExprEnum::Add(lhs, rhs) => {
+        format_bin_op(level, "+", lhs, rhs, f)
+      }
+      ExprEnum::Sub(lhs, rhs) => {
+        format_bin_op(level, "-", lhs, rhs, f)
+      }
+      ExprEnum::Mul(lhs, rhs) => {
+        format_bin_op(level, "*", lhs, rhs, f)
+      }
+      ExprEnum::Div(lhs, rhs) => {
+        format_bin_op(level, "/", lhs, rhs, f)
+      }
+      ExprEnum::Gt(lhs, rhs) => {
+        format_bin_op(level, ">", lhs, rhs, f)
+      }
+      ExprEnum::Lt(lhs, rhs) => {
+        format_bin_op(level, "<", lhs, rhs, f)
+      }
+      ExprEnum::If(cond, t_branch, f_branch) => {
+        write!(f, "if ")?;
+        cond.format(level, f)?;
+        write!(f, " {{ ")?;
+        for stmt in t_branch.iter() {
+          write!(f, "{indent}  ")?;
+          stmt.format(level + 1, f)?;
+        }
+        write!(f, "}}")?;
+        if let Some(f_branch) = f_branch {
+          write!(f, " else {{")?;
+          for stmt in f_branch.iter() {
+            write!(f, "{indent}  ")?;
+            stmt.format(level + 1, f)?;
+          }
+          write!(f, "}}")?;
+        }
+        Ok(())
+      }
+      ExprEnum::Await(ex) => {
+        write!(f, "await ")?;
+        ex.format(level, f)?;
+        Ok(())
+      }
+    }
+  }
+}
+
+fn format_bin_op(
+  level: usize,
+  op: &str,
+  lhs: &Expression,
+  rhs: &Expression,
+  f: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+  write!(f, "(")?;
+  lhs.format(level, f)?;
+  write!(f, "{op}")?;
+  rhs.format(level, f)?;
+  write!(f, ")")?;
+  Ok(())
+}
+
+impl<'a> Statement<'a> {
+  fn format(
+    &self,
+    level: usize,
+    f: &mut impl std::io::Write,
+  ) -> std::io::Result<()> {
+    use Statement::*;
+    let indent = "  ".repeat(level);
+    match self {
+      Expression(ex) => {
+        write!(f, "{indent}")?;
+        ex.format(level, f)?;
+        writeln!(f, ";")
+      }
+      VarDef { name, td, ex, .. } => {
+        write!(f, "{indent}var {name}: {td} = ")?;
+        ex.format(level, f)?;
+        writeln!(f, ";")
+      }
+      VarAssign { name, ex, .. } => {
+        write!(f, "{indent}{name} = ")?;
+        ex.format(level, f)?;
+        writeln!(f, ";")
+      }
+      For {
+        loop_var,
+        start,
+        end,
+        stmts,
+        ..
+      } => {
+        write!(f, "{indent}for {loop_var} in ")?;
+        start.format(level, f)?;
+        write!(f, "..")?;
+        end.format(level, f)?;
+        writeln!(f, " {{")?;
+        for stmt in stmts {
+          stmt.format(level + 1, f)?;
+        }
+        writeln!(f, "{indent}}}")?;
+        Ok(())
+      }
+      Break => write!(f, "{indent}break;"),
+      Continue => write!(f, "{indent}continue;"),
+      FnDef {
+        name,
+        args,
+        ret_type,
+        stmts,
+        cofn,
+      } => {
+        writeln!(f, "")?; // Put an extra line for readability
+        write!(
+          f,
+          "{indent}{} {name}(",
+          if *cofn { "cofn" } else { "fn" }
+        )?;
+        for (i, (_, arg)) in args.iter().enumerate() {
+          if i == 0 {
+            write!(f, "{arg}")?;
+          } else {
+            write!(f, ", {arg}")?;
+          }
+        }
+        writeln!(f, ") -> {ret_type} {{")?;
+        for stmt in stmts {
+          stmt.format(level + 1, f)?;
+        }
+        writeln!(f, "{indent}}}")?;
+        writeln!(f, "")?; // Put an extra line for readability
+        Ok(())
+      }
+      Return(ex) => {
+        write!(f, "{indent}return ")?;
+        ex.format(level, f)?;
+        writeln!(f, ";")
+      }
+      Yield(ex) => {
+        write!(f, "{indent}yield ")?;
+        ex.format(level, f)?;
+        writeln!(f, ";")
+      }
+    }
+  }
+}
+
+pub fn print_stmts(
+  stmts: &[Statement],
+  f: &mut impl std::io::Write,
+) -> std::io::Result<()> {
+  for stmt in stmts {
+    stmt.format(1, f)?;
+  }
+  Ok(())
+}

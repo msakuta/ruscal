@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-  ast::{Span, Statements},
+  ast::{print_stmts, Span, Statements},
   bytecode::ByteCode,
   compiler::Compiler,
   optimizer::optimize,
@@ -39,14 +39,20 @@ pub fn write_program(
   let mut compiler = Compiler::new();
   let mut stmts = parse_program(source_file, source)?;
 
-  if args.show_ast {
+  if args.show_debug_ast {
     println!("AST: {stmts:#?}");
+  } else if args.show_ast {
+    println!("AST: ");
+    print_stmts(&stmts, &mut std::io::stdout())?;
   }
 
   if args.optimize {
     optimize(&mut stmts)?;
-    if args.show_ast {
+    if args.show_debug_ast {
       println!("AST after optimization: {stmts:#?}");
+    } else if args.show_ast {
+      println!("AST after optimization:");
+      print_stmts(&stmts, &mut std::io::stdout())?;
     }
   }
 
