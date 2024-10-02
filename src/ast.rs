@@ -158,19 +158,17 @@ impl<'a> Expression<'a> {
       ExprEnum::If(cond, t_branch, f_branch) => {
         write!(f, "if ")?;
         cond.format(level, f)?;
-        write!(f, " {{ ")?;
+        writeln!(f, " {{ ")?;
         for stmt in t_branch.iter() {
-          write!(f, "{indent}  ")?;
           stmt.format(level + 1, f)?;
         }
-        write!(f, "}}")?;
+        write!(f, "{indent}}}")?;
         if let Some(f_branch) = f_branch {
-          write!(f, " else {{")?;
+          writeln!(f, " else {{")?;
           for stmt in f_branch.iter() {
-            write!(f, "{indent}  ")?;
             stmt.format(level + 1, f)?;
           }
-          write!(f, "}}")?;
+          write!(f, "{indent}}}")?;
         }
         Ok(())
       }

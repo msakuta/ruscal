@@ -11,15 +11,15 @@ pub fn optimize(ast: &mut Statements) -> Result<(), String> {
   let mut constants = Constants::new();
   for stmt in ast {
     match stmt {
-      Expression(ex) => optim_expr(ex, &constants)?,
+      Expression(ex) => optim_expr(ex, &mut constants)?,
       VarDef { name, ex, .. } => {
-        optim_expr(ex, &constants)?;
+        optim_expr(ex, &mut constants)?;
         if let Some(ex) = const_expr(ex, &constants) {
           constants.insert(name.to_string(), ex);
         }
       }
       VarAssign { name, ex, .. } => {
-        optim_expr(ex, &constants)?;
+        optim_expr(ex, &mut constants)?;
         if let Some(ex) = const_expr(ex, &constants) {
           constants.insert(name.to_string(), ex);
         } else {
@@ -33,7 +33,7 @@ pub fn optimize(ast: &mut Statements) -> Result<(), String> {
       }
       FnDef { stmts, .. } => optimize(stmts)?,
       Return(ex) | Statement::Yield(ex) => {
-        optim_expr(ex, &constants)?;
+        optim_expr(ex, &mut constants)?;
       }
       Break | Continue => {}
     }
@@ -41,12 +41,16 @@ pub fn optimize(ast: &mut Statements) -> Result<(), String> {
   Ok(())
 }
 
+/// Check if there is a variable assigned in this statements and remove it from the constant table if exists.
 fn check_assigned(
   stmts: &[Statement],
   constants: &mut Constants,
 ) {
   for stmt in stmts {
     match stmt {
+      Statement::Expression(ex) => {
+        check_assigned_expr(ex, constants)
+      }
       Statement::VarAssign { name, ex, .. } => {
         if const_expr(ex, constants).is_none() {
           constants.remove(**name);
@@ -57,10 +61,49 @@ fn check_assigned(
   }
 }
 
+/// Check if there is a variable assigned in this sub-expression and remove it from the constant table if exists.
+fn check_assigned_expr(
+  expr: &Expression,
+  constants: &mut Constants,
+) {
+  match &expr.expr {
+    ExprEnum::FnInvoke(_, args) => {
+      for arg in args {
+        check_assigned_expr(arg, constants);
+      }
+    }
+    ExprEnum::Add(lhs, rhs)
+    | ExprEnum::Sub(lhs, rhs)
+    | ExprEnum::Mul(lhs, rhs)
+    | ExprEnum::Div(lhs, rhs)
+    | ExprEnum::Gt(lhs, rhs)
+    | ExprEnum::Lt(lhs, rhs) => {
+      check_assigned_expr(lhs, constants);
+      check_assigned_expr(rhs, constants);
+    }
+    ExprEnum::If(cond, t_branch, f_branch) => {
+      check_assigned_expr(cond, constants);
+      check_assigned(t_branch, constants);
+      if let Some(f_branch) = f_branch {
+        check_assigned(f_branch, constants);
+      }
+    }
+    ExprEnum::Await(ex) => check_assigned_expr(ex, constants),
+    _ => {}
+  }
+}
+
 fn optim_expr<'a>(
   expr: &mut Expression<'a>,
-  constants: &Constants<'a>,
+  constants: &mut Constants<'a>,
 ) -> Result<(), String> {
+  if let ExprEnum::If(_, t_branch, f_branch) = &expr.expr {
+    check_assigned(t_branch, constants);
+    if let Some(f_branch) = f_branch {
+      check_assigned(f_branch, constants);
+    }
+  }
+
   if let Some(val) = const_expr(expr, constants) {
     *expr = val;
   }
