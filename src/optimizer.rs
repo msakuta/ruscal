@@ -48,13 +48,22 @@ fn check_assigned(
 ) {
   for stmt in stmts {
     match stmt {
-      Statement::Expression(ex) => {
-        check_assigned_expr(ex, constants)
+      Statement::Expression(ex)
+      | Statement::Return(ex)
+      | Statement::Yield(ex) => {
+        check_assigned_expr(ex, constants);
       }
-      Statement::VarAssign { name, ex, .. } => {
-        if const_expr(ex, constants).is_none() {
-          constants.remove(**name);
-        }
+      Statement::VarDef { name, ex, .. }
+      | Statement::VarAssign { name, ex, .. } => {
+        check_assigned_expr(ex, constants);
+        constants.remove(**name);
+      }
+      Statement::For {
+        start, end, stmts, ..
+      } => {
+        check_assigned_expr(start, constants);
+        check_assigned_expr(end, constants);
+        check_assigned(stmts, constants);
       }
       _ => {}
     }

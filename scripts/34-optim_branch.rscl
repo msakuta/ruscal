@@ -1,0 +1,15 @@
+
+var a: f64 = 24;
+
+fn non_const() -> i64 {
+    0
+}
+
+if non_const() {
+    print(a);
+} else {
+    a = 42;
+    print(a);
+};
+
+print(a);
