@@ -64,6 +64,14 @@ fn optim_expr<'a>(
   if let Some(val) = const_expr(expr, constants) {
     *expr = val;
   }
+  match &mut expr.expr {
+    ExprEnum::FnInvoke(_, args) => {
+      for arg in args {
+        optim_expr(arg, constants)?;
+      }
+    }
+    _ => {}
+  }
   Ok(())
 }
 
@@ -100,7 +108,7 @@ fn const_expr<'a>(
       constants,
     ),
     ExprEnum::Div(lhs, rhs) => optim_bin_op(
-      |lhs, rhs| lhs * rhs,
+      |lhs, rhs| lhs / rhs,
       |_, _| None,
       lhs,
       rhs,
@@ -123,18 +131,9 @@ fn const_expr<'a>(
       expr.span,
       constants,
     ),
-    ExprEnum::FnInvoke(span, args) => {
-      let args = args
-        .iter()
-        .map(|arg| {
-          const_expr(arg, constants)
-            .unwrap_or_else(|| arg.clone())
-        })
-        .collect();
-      Some(Expression::new(
-        ExprEnum::FnInvoke(*span, args),
-        expr.span,
-      ))
+    ExprEnum::FnInvoke(_, _) => {
+      // For now, all functions are assumed non-const.
+      None
     }
     _ => None,
   }
